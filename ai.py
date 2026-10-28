@@ -53,7 +53,9 @@ TRIAGE_SYSTEM = (
     "Subito.it (Torino). Per ciascuno stima a quanto lo si rivende REALISTICAMENTE "
     "(prezzo di vendita usato in Italia, privati/Vinted/eBay), se ha un valore sensato. "
     "Se è spazzatura, ricambi, un oggetto non identificabile o un annuncio di acquisto, "
-    "metti v=0. Se manca qualche dato (es. memoria) usa il caso più probabile e abbassa c.\n"
+    "metti v=0. Se manca qualche dato (es. memoria) usa il caso più probabile e abbassa c. "
+    "Non essere ottimista: v è il prezzo a cui si vende davvero in poche settimane, in condizioni medie, non il massimo. "
+    "Se l'annuncio è un lotto, ha difetti dichiarati o è un oggetto raro/di difficile prezzo, abbassa c.\n"
     "Rispondi SOLO con un array JSON, un elemento per annuncio: "
     '[{"i":<numero>,"v":<rivendita stimata in euro>,"c":<confidenza 0-100>,"n":"<max 8 parole>"}]'
 )

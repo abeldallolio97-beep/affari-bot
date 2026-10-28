@@ -5,6 +5,7 @@ Uso:
   python bot.py scan   # scansione completa subito (serve TELEGRAM_CHAT_ID)
   python bot.py test   # prova di lettura di Subito (non serve l'AI)
 """
+import html as _html
 import os
 import re
 import sys
@@ -26,9 +27,10 @@ MIN_PRICE = int(os.getenv("MIN_PRICE", "40"))              # scarta sotto questo
 MAX_PRICE = int(os.getenv("MAX_PRICE", "2500"))            # scarta sopra (capitale)
 MIN_VALUE = int(os.getenv("MIN_VALUE", "150"))             # scarta se rivendita stimata sotto
 TARGET_ADS = int(os.getenv("TARGET_ADS", "1000"))          # annunci per link
-MAX_FINALISTS = int(os.getenv("MAX_FINALISTS", "12"))      # analisi a fondo per scansione
-MAX_USD_PER_SCAN = float(os.getenv("MAX_USD_PER_SCAN", "2"))  # tetto di spesa per scansione
+MAX_FINALISTS = int(os.getenv("MAX_FINALISTS", "5"))      # analisi a fondo per scansione
+MAX_USD_PER_SCAN = float(os.getenv("MAX_USD_PER_SCAN", "1"))  # tetto di spesa per scansione
 TRIAGE_MARGIN = int(os.getenv("TRIAGE_MARGIN", "90"))      # soglia larga del triage
+RANK_SHOW = int(os.getenv("RANK_SHOW", "100"))              # righe della classifica veloce
 MAX_AGE_DAYS = float(os.getenv("MAX_AGE_DAYS", "3"))        # ignora annunci più vecchi di N giorni
 
 BUYER_WORDS = re.compile(r"\b(cerco|cercasi|compro|acquisto|ritiro usato)\b", re.I)
@@ -219,7 +221,7 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s):
 
     c, spend = ai.client(), ai.Spend()
     tri = ai.triage(c, candidates, spend)
-    scored, near = [], []
+    ranked = []  # (punteggio, margine stimato, valore stimato, confidenza, nota, annuncio)
     for idx, a in enumerate(candidates):
         t = tri.get(idx)
         if not t:
@@ -228,28 +230,25 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s):
             v, conf = float(t.get("v") or 0), float(t.get("c") or 0)
         except (TypeError, ValueError):
             continue
-        est = v * 0.9 - a["price"]
-        if v >= 1:
-            near.append((est, v, a))
-        if v < MIN_VALUE:
+        if v < 1:
             continue
-        if est >= TRIAGE_MARGIN:
-            scored.append((est * max(conf, 20) / 100, a))
-    scored.sort(key=lambda x: -x[0])
-    finalists = [a for _, a in scored[:MAX_FINALISTS]]
-    lt = ai.LAST_TRIAGE
-    n_val = len(near)
-    diag = [f"🧪 Valutazione veloce: {lt['items']}/{len(candidates)} annunci valutati, {n_val} con un valore stimato, "
-            f"{len(finalists)} promettenti (errori API {lt['api_errors']}, risposte illeggibili {lt['parse_failures']})."]
-    if len(finalists) < 5 and near:
-        near.sort(key=lambda x: -x[0])
-        diag.append("I più vicini a un affare secondo la valutazione veloce:")
-        for est, v, a in near[:6]:
-            diag.append(f"• {esc(a['title'][:50])} — {a['price']}€, valore stimato {v:.0f}€ (margine ~{est:.0f}€)")
-    tg.send(chat, "\n".join(diag))
-    tg.send(chat, f"🔬 {len(finalists)} annunci promettenti: analisi a fondo con foto e prezzi di mercato…")
+        est = v * 0.9 - a["price"]
+        ranked.append((est * max(conf, 20) / 100, est, v, conf, str(t.get("n") or ""), a))
+    ranked.sort(key=lambda x: -x[0])
 
+    lt = ai.LAST_TRIAGE
+    tg.send(
+        chat,
+        f"🧪 Valutazione veloce: {lt['items']}/{len(candidates)} annunci valutati, {len(ranked)} con un valore stimato "
+        f"(errori API {lt['api_errors']}, risposte illeggibili {lt['parse_failures']}) · costo ≈ ${spend.usd:.2f}",
+    )
+    send_ranking(chat, ranked)
+
+    # analisi a fondo (costosa) solo per i pochi candidati che superano le soglie
+    finalists = [r[5] for r in ranked if r[2] >= MIN_VALUE and r[1] >= TRIAGE_MARGIN][:MAX_FINALISTS]
     deals, analyzed = [], 0
+    if finalists:
+        tg.send(chat, f"🔬 Analisi a fondo (foto + prezzi di mercato) dei {len(finalists)} più promettenti…")
     for a in finalists:
         if spend.usd >= MAX_USD_PER_SCAN:
             tg.send(chat, f"⛔ Tetto di spesa per scansione raggiunto (${spend.usd:.2f}). Mi fermo qui.")
@@ -272,11 +271,31 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s):
     mins = (time.time() - t0) / 60
     summary = f"\n📊 Letti {len(all_ads)} · analizzati a fondo {analyzed} · costo AI ≈ ${spend.usd:.2f} · lettura Subito ≈ ${apify_cost:.2f} · {mins:.0f} min"
     if not deals:
-        tg.send(chat, f"😶 Nessun affare con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}% in questa scansione." + summary)
+        tg.send(chat, f"😶 Nessun affare VERIFICATO con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}% in questa scansione. "
+                      f"La classifica veloce qui sopra resta solo indicativa (stime non verificate)." + summary)
         return
-    tg.send(chat, f"🏆 <b>{len(deals)} affari trovati</b> (margine ≥ {MIN_MARGIN}€), dal migliore:" + summary)
+    tg.send(chat, f"🏆 <b>{len(deals)} affari VERIFICATI</b> (margine ≥ {MIN_MARGIN}€), dal migliore:" + summary)
     for rank, (_, a, v) in enumerate(deals, 1):
         tg.send(chat, format_deal(rank, a, v))
+
+
+def send_ranking(chat, ranked):
+    """Classifica veloce: i migliori RANK_SHOW annunci dal migliore al peggiore, con gli importi."""
+    top = ranked[:RANK_SHOW]
+    if not top:
+        tg.send(chat, "Nessun annuncio con un valore stimato.")
+        return
+    lines = [f"📋 <b>Classifica veloce</b> (top {len(top)}, dal migliore). Sono stime NON verificate: "
+             "prezzo → rivendita stimata, margine al netto del 10%, confidenza dell'AI.\n"]
+    for n, (_, est, v, conf, note, a) in enumerate(top, 1):
+        title = esc(a["title"][:45])
+        url = _html.escape(a["url"] or "", quote=True)
+        lines.append(
+            f'{n}. <a href="{url}">{title}</a>\n   {a["price"]}€ → ~{v:.0f}€ · margine ~{est:.0f}€ · conf {conf:.0f}%'
+            + (f" · {esc(note[:40])}" if note else "")
+        )
+    tg.send(chat, "\n".join(lines))
+    tg.send(chat, "Per verificare a fondo uno di questi (foto + prezzi di mercato, costa circa 0,15 $) scrivi:\n/analizza <link dell'annuncio>")
 
 
 def run_rescan(chat):
@@ -294,11 +313,36 @@ def run_rescan(chat):
     analyze_ads(chat, ads, 0.0, t0, True, subito.make_session())
 
 
+def run_analyze_one(chat, url):
+    """Analisi a fondo di UN annuncio scelto dall'utente (per link), dai dati già letti."""
+    import ai
+
+    t0 = time.time()
+    if not os.environ.get("ANTHROPIC_API_KEY") or not apify_source.enabled():
+        tg.send(chat, "Servono ANTHROPIC_API_KEY e APIFY_TOKEN.")
+        return
+    key = url.split("?")[0].strip().rstrip("/")
+    ads, err = apify_source.latest_ads(len(load_links()))
+    found = next((a for a in ads if (a["url"] or "").split("?")[0].rstrip("/") == key), None)
+    if not found:
+        tg.send(chat, "Non trovo questo annuncio nelle ultime letture (forse è più vecchio o l'indirizzo non è completo). Fai /scan e riprova.")
+        return
+    tg.send(chat, f"🔬 Analizzo a fondo: {esc(found['title'][:60])} …")
+    c, spend = ai.client(), ai.Spend()
+    v = ai.analyze(c, found, subito.make_session(), spend)
+    if not v:
+        tg.send(chat, f"L'analisi non ha prodotto un risultato (costo ≈ ${spend.usd:.2f}). Riprova.")
+        return
+    ok, v = validate(v, found["price"])
+    verdict = "✅ rispetta i tuoi criteri" if ok else "❌ NON rispetta i tuoi criteri (margine/affidabilità/riferimenti)"
+    tg.send(chat, f"{verdict}\n" + format_deal(1, found, v) + f"Costo ≈ ${spend.usd:.2f} · {(time.time() - t0) / 60:.0f} min")
+
+
 # ----------------------------------------------------------------------- poll
 HELP = (
     "Comandi:\n/scan – scansione completa di tutte le ricerche\n"
     "/scan elettronica – solo una ricerca (nome in links.txt)\n"
-    "/ri – rianalizza gli ultimi annunci già letti (non ripaga la lettura)\n/test – prova la lettura di Subito (senza AI)\n/help – questo messaggio"
+    "/analizza <link> – analisi a fondo di un annuncio (~0,15 $)\n/ri – rianalizza gli ultimi annunci già letti (non ripaga la lettura)\n/test – prova la lettura di Subito (senza AI)\n/help – questo messaggio"
 )
 
 
@@ -321,7 +365,9 @@ def run_poll():
             continue  # ignora gli sconosciuti
         cmd, _, arg = text.partition(" ")
         cmd = cmd.split("@")[0].lower()
-        if cmd == "/ri":
+        if cmd == "/analizza":
+            run_analyze_one(chat, arg.strip()) if arg.strip() else tg.send(chat, "Scrivi: /analizza <link dell'annuncio>")
+        elif cmd == "/ri":
             run_rescan(chat)
         elif cmd == "/scan":
             run_scan(chat, arg.strip() or None)
