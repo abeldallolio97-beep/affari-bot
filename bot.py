@@ -171,6 +171,16 @@ def run_scan(chat, only=None):
         return
 
     candidates = [a for a in all_ads if passes_rules(a)]
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        prices = sorted(a["price"] for a in candidates)
+        med = prices[len(prices) // 2] if prices else 0
+        tg.send(
+            chat,
+            f"📋 <b>Solo lettura (AI non ancora attiva)</b>\n{len(all_ads)} annunci letti, {len(candidates)} dopo i filtri di prezzo "
+            f"({MIN_PRICE}-{MAX_PRICE}€), prezzo mediano {med}€.\nCosto lettura Subito ≈ ${apify_cost:.2f} · {(time.time() - t0) / 60:.0f} min\n"
+            "Per la valutazione degli affari serve il secret ANTHROPIC_API_KEY.",
+        )
+        return
     tg.send(chat, f"📋 {len(all_ads)} annunci totali, {len(candidates)} dopo i filtri di prezzo. Valutazione veloce con l'AI…")
 
     c, spend = ai.client(), ai.Spend()
