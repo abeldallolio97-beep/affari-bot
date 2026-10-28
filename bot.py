@@ -127,7 +127,9 @@ def validate(v, price):
         refs = v.get("references") or []
         n_refs = len([r for r in refs if isinstance(r, dict) and r.get("price_eur")])
         rel = int(v.get("reliability_pct") or 0)
-        if n_refs < MIN_REFS:
+        types = {str(r.get("type", "")).strip() for r in refs if isinstance(r, dict) and r.get("price_eur")}
+        types.discard("")
+        if n_refs < MIN_REFS or len(types) < 2:  # servono 3 prezzi e almeno 2 tipi diversi (nuovo/usato...)
             rel = min(rel, 50)
         v["reliability_pct"] = rel
         probable = float(v.get("margin_probable_eur") or 0)
@@ -145,7 +147,7 @@ def validate(v, price):
 
 def format_deal(rank, ad, v):
     refs = ", ".join(
-        f"{esc(r.get('source'))} {r.get('price_eur')}€"
+        f"{esc(r.get('source'))} ({esc(r.get('type', '?'))}) {r.get('price_eur')}€"
         for r in (v.get("references") or [])
         if isinstance(r, dict)
     )
