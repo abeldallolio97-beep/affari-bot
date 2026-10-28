@@ -53,6 +53,7 @@ def normalize(it):
         "images": images,
         "town": geo.get("city", "") if isinstance(geo, dict) else "",
         "date": pub.get("local") if isinstance(pub, dict) else None,
+        "date_iso": pub.get("iso") if isinstance(pub, dict) else None,
         "seller": it.get("advertiser_type"),
     }
 

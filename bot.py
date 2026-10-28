@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timezone
 
 import apify_source
 import subito
@@ -25,9 +26,10 @@ MIN_PRICE = int(os.getenv("MIN_PRICE", "40"))              # scarta sotto questo
 MAX_PRICE = int(os.getenv("MAX_PRICE", "2500"))            # scarta sopra (capitale)
 MIN_VALUE = int(os.getenv("MIN_VALUE", "150"))             # scarta se rivendita stimata sotto
 TARGET_ADS = int(os.getenv("TARGET_ADS", "1000"))          # annunci per link
-MAX_FINALISTS = int(os.getenv("MAX_FINALISTS", "30"))      # analisi a fondo per scansione
-MAX_USD_PER_SCAN = float(os.getenv("MAX_USD_PER_SCAN", "3"))  # tetto di spesa per scansione
+MAX_FINALISTS = int(os.getenv("MAX_FINALISTS", "12"))      # analisi a fondo per scansione
+MAX_USD_PER_SCAN = float(os.getenv("MAX_USD_PER_SCAN", "2"))  # tetto di spesa per scansione
 TRIAGE_MARGIN = int(os.getenv("TRIAGE_MARGIN", "90"))      # soglia larga del triage
+MAX_AGE_DAYS = float(os.getenv("MAX_AGE_DAYS", "3"))        # ignora annunci più vecchi di N giorni
 
 BUYER_WORDS = re.compile(r"\b(cerco|cercasi|compro|acquisto|ritiro usato)\b", re.I)
 
@@ -87,8 +89,32 @@ def run_test(chat):
 
 
 # ----------------------------------------------------------------------- scan
+def age_days(a):
+    """Età dell'annuncio in giorni (None se la data non è nota)."""
+    try:
+        d = datetime.fromisoformat(a["date_iso"].replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            d = d.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - d).total_seconds() / 86400
+    except (KeyError, AttributeError, ValueError, TypeError):
+        return None
+
+
+def age_stats(ads):
+    ages = [x for x in (age_days(a) for a in ads) if x is not None]
+    if not ages:
+        return "età annunci: n/d"
+    ages.sort()
+    h24 = sum(1 for x in ages if x <= 1)
+    return (f"età: {h24} nelle ultime 24h, {sum(1 for x in ages if x <= 3)} negli ultimi 3 giorni; "
+            f"il più vecchio ha {ages[-1]:.1f} giorni")
+
+
 def passes_rules(a):
     if not a["price"] or a["price"] < MIN_PRICE or a["price"] > MAX_PRICE:
+        return False
+    age = age_days(a)
+    if age is not None and age > MAX_AGE_DAYS:
         return False
     if BUYER_WORDS.search(a["title"]):
         return False
@@ -177,11 +203,11 @@ def run_scan(chat, only=None):
         tg.send(
             chat,
             f"📋 <b>Solo lettura (AI non ancora attiva)</b>\n{len(all_ads)} annunci letti, {len(candidates)} dopo i filtri di prezzo "
-            f"({MIN_PRICE}-{MAX_PRICE}€), prezzo mediano {med}€.\nCosto lettura Subito ≈ ${apify_cost:.2f} · {(time.time() - t0) / 60:.0f} min\n"
+            f"({MIN_PRICE}-{MAX_PRICE}€, max {MAX_AGE_DAYS:g} giorni), prezzo mediano {med}€.\n{age_stats(all_ads)}\nCosto lettura Subito ≈ ${apify_cost:.2f} · {(time.time() - t0) / 60:.0f} min\n"
             "Per la valutazione degli affari serve il secret ANTHROPIC_API_KEY.",
         )
         return
-    tg.send(chat, f"📋 {len(all_ads)} annunci totali, {len(candidates)} dopo i filtri di prezzo. Valutazione veloce con l'AI…")
+    tg.send(chat, f"📋 {len(all_ads)} annunci totali, {len(candidates)} dopo i filtri di prezzo e di età ({age_stats(all_ads)}). Valutazione veloce con l'AI…")
 
     c, spend = ai.client(), ai.Spend()
     tri = ai.triage(c, candidates, spend)
