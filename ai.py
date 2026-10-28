@@ -59,9 +59,13 @@ TRIAGE_SYSTEM = (
 )
 
 
+LAST_TRIAGE = {"batches": 0, "api_errors": 0, "parse_failures": 0, "items": 0}
+
+
 def triage(c, ads, spend, batch=30):
     """Restituisce {indice_annuncio: {v, c, n}} per tutti gli annunci."""
     out = {}
+    LAST_TRIAGE.update(batches=0, api_errors=0, parse_failures=0, items=0)
     for start in range(0, len(ads), batch):
         chunk = ads[start : start + batch]
         lines = []
@@ -79,13 +83,22 @@ def triage(c, ads, spend, batch=30):
             )
         except anthropic.APIError as e:
             print("triage error", e)
+            LAST_TRIAGE["api_errors"] += 1
             continue
+        LAST_TRIAGE["batches"] += 1
         spend.add(TRIAGE_MODEL, r.usage)
         text = "".join(b.text for b in r.content if b.type == "text")
-        arr = _json_from(text, "[", "]") or []
+        arr = _json_from(text, "[", "]")
+        if arr is None:
+            LAST_TRIAGE["parse_failures"] += 1
+            print("triage: risposta non leggibile:", text[:300])
+            continue
         for item in arr:
-            if isinstance(item, dict) and "i" in item:
+            try:
                 out[int(item["i"])] = item
+                LAST_TRIAGE["items"] += 1
+            except (KeyError, TypeError, ValueError):
+                continue
     return out
 
 

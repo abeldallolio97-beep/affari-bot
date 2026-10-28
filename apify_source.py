@@ -113,3 +113,32 @@ def scrape(url, max_items, wait_minutes=40):
             ads.append(a)
     err = None if status == "SUCCEEDED" else f"stato Apify: {status}"
     return ads, cost, err
+
+
+def latest_ads(n_runs, hours=24):
+    """Rilegge i dati delle ultime n_runs letture riuscite (gratis: sono già pagate)."""
+    try:
+        r = requests.get(
+            f"{API}/acts/{ACTOR}/runs",
+            params={"token": TOKEN, "desc": 1, "limit": 20, "status": "SUCCEEDED"},
+            timeout=60,
+        )
+        runs = r.json()["data"]["items"][:n_runs]
+    except (requests.RequestException, KeyError, ValueError):
+        return [], "impossibile leggere l'elenco delle letture"
+    ads, seen = [], set()
+    for run in runs:
+        try:
+            d = requests.get(
+                f"{API}/datasets/{run['defaultDatasetId']}/items",
+                params={"token": TOKEN, "clean": "true", "format": "json", "limit": 5000},
+                timeout=120,
+            ).json()
+        except (requests.RequestException, ValueError, KeyError):
+            continue
+        for it in d if isinstance(d, list) else []:
+            a = normalize(it) if isinstance(it, dict) else None
+            if a and a["url"] and a["id"] not in seen:
+                seen.add(a["id"])
+                ads.append(a)
+    return ads, None

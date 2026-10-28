@@ -198,6 +198,12 @@ def run_scan(chat, only=None):
     if not all_ads:
         return
 
+    analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s)
+
+
+def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s):
+    import ai
+
     candidates = [a for a in all_ads if passes_rules(a)]
     if not os.environ.get("ANTHROPIC_API_KEY"):
         prices = sorted(a["price"] for a in candidates)
@@ -213,19 +219,34 @@ def run_scan(chat, only=None):
 
     c, spend = ai.client(), ai.Spend()
     tri = ai.triage(c, candidates, spend)
-    scored = []
+    scored, near = [], []
     for idx, a in enumerate(candidates):
         t = tri.get(idx)
         if not t:
             continue
-        v, conf = float(t.get("v") or 0), float(t.get("c") or 0)
-        if v < MIN_VALUE:
+        try:
+            v, conf = float(t.get("v") or 0), float(t.get("c") or 0)
+        except (TypeError, ValueError):
             continue
         est = v * 0.9 - a["price"]
+        if v >= 1:
+            near.append((est, v, a))
+        if v < MIN_VALUE:
+            continue
         if est >= TRIAGE_MARGIN:
             scored.append((est * max(conf, 20) / 100, a))
     scored.sort(key=lambda x: -x[0])
     finalists = [a for _, a in scored[:MAX_FINALISTS]]
+    lt = ai.LAST_TRIAGE
+    n_val = len(near)
+    diag = [f"🧪 Valutazione veloce: {lt['items']}/{len(candidates)} annunci valutati, {n_val} con un valore stimato, "
+            f"{len(finalists)} promettenti (errori API {lt['api_errors']}, risposte illeggibili {lt['parse_failures']})."]
+    if len(finalists) < 5 and near:
+        near.sort(key=lambda x: -x[0])
+        diag.append("I più vicini a un affare secondo la valutazione veloce:")
+        for est, v, a in near[:6]:
+            diag.append(f"• {esc(a['title'][:50])} — {a['price']}€, valore stimato {v:.0f}€ (margine ~{est:.0f}€)")
+    tg.send(chat, "\n".join(diag))
     tg.send(chat, f"🔬 {len(finalists)} annunci promettenti: analisi a fondo con foto e prezzi di mercato…")
 
     deals, analyzed = [], 0
@@ -258,11 +279,26 @@ def run_scan(chat, only=None):
         tg.send(chat, format_deal(rank, a, v))
 
 
+def run_rescan(chat):
+    """Rianalizza gli ultimi dati già letti da Apify, senza pagare di nuovo la lettura."""
+    t0 = time.time()
+    if not apify_source.enabled():
+        tg.send(chat, "Serve APIFY_TOKEN.")
+        return
+    links = load_links()
+    tg.send(chat, "♻️ Rianalizzo gli ultimi annunci già letti (nessun costo di lettura)…")
+    ads, err = apify_source.latest_ads(len(links))
+    if not ads:
+        tg.send(chat, f"Nessun dato recente trovato ({esc(err or 'vuoto')}). Fai prima /scan.")
+        return
+    analyze_ads(chat, ads, 0.0, t0, True, subito.make_session())
+
+
 # ----------------------------------------------------------------------- poll
 HELP = (
     "Comandi:\n/scan – scansione completa di tutte le ricerche\n"
     "/scan elettronica – solo una ricerca (nome in links.txt)\n"
-    "/test – prova la lettura di Subito (senza AI)\n/help – questo messaggio"
+    "/ri – rianalizza gli ultimi annunci già letti (non ripaga la lettura)\n/test – prova la lettura di Subito (senza AI)\n/help – questo messaggio"
 )
 
 
@@ -285,7 +321,9 @@ def run_poll():
             continue  # ignora gli sconosciuti
         cmd, _, arg = text.partition(" ")
         cmd = cmd.split("@")[0].lower()
-        if cmd == "/scan":
+        if cmd == "/ri":
+            run_rescan(chat)
+        elif cmd == "/scan":
             run_scan(chat, arg.strip() or None)
         elif cmd == "/test":
             run_test(chat)
