@@ -105,24 +105,24 @@ OUTPUT: SOLO un oggetto JSON, senza altro testo:
 
 
 def _image_blocks(urls, session, limit=3):
+    """Foto per l'AI: scaricate da noi; se non si riesce, le scarica Anthropic dal link."""
     blocks = []
     for u in urls[:limit]:
+        block = None
         try:
             r = session.get(u, timeout=20)
             ct = (r.headers.get("content-type") or "").split(";")[0]
             if r.ok and ct in ("image/jpeg", "image/png", "image/webp", "image/gif") and len(r.content) < 4_500_000:
-                blocks.append(
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": ct,
-                            "data": base64.b64encode(r.content).decode(),
-                        },
-                    }
-                )
+                block = {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": ct, "data": base64.b64encode(r.content).decode()},
+                }
         except requests.RequestException:
-            continue
+            pass
+        if block is None and u.startswith("http"):
+            block = {"type": "image", "source": {"type": "url", "url": u}}
+        if block:
+            blocks.append(block)
     return blocks
 
 
@@ -133,7 +133,8 @@ def analyze(c, ad, session, spend):
         f"DATA: {ad.get('date')}\nCARATTERISTICHE: {ad['features']}\n"
         f"DESCRIZIONE: {(ad['body'] or '')[:2500]}\nLINK: {ad['url']}"
     )
-    content = _image_blocks(ad["images"], session) + [{"type": "text", "text": text}]
+    images = _image_blocks(ad["images"], session)
+    content = images + [{"type": "text", "text": text}]
     kwargs = dict(
         model=ANALYSIS_MODEL,
         max_tokens=4000,
@@ -148,6 +149,14 @@ def analyze(c, ad, session, spend):
     for _ in range(4):  # gestisce le pause delle ricerche web lunghe
         try:
             resp = c.messages.create(messages=messages, **kwargs)
+        except anthropic.BadRequestError as e:
+            if images:  # foto non leggibili: riprova solo con il testo
+                print("immagini rifiutate, riprovo senza:", e)
+                images = []
+                messages = [{"role": "user", "content": [{"type": "text", "text": text}]}]
+                continue
+            print("analysis error", e)
+            return None
         except anthropic.APIError as e:
             print("analysis error", e)
             return None

@@ -10,6 +10,7 @@ import re
 import sys
 import time
 
+import apify_source
 import subito
 import telegram_api as tg
 from telegram_api import esc
@@ -47,7 +48,23 @@ def load_links(only=None):
 
 
 # ----------------------------------------------------------------------- test
+def run_test_apify(chat):
+    name, url = load_links()[0]
+    tg.send(chat, f"🔎 Test lettura via Apify su «{esc(name)}» (30 annunci, costo ~0,03 $)…")
+    ads, cost, err = apify_source.scrape(url, 30, wait_minutes=10)
+    lines = [f"Annunci letti: <b>{len(ads)}</b> · costo ${cost:.3f}" + (f" · ⚠️ {esc(err)}" if err else "")]
+    with_desc = sum(1 for a in ads if a["body"])
+    with_img = sum(1 for a in ads if a["images"])
+    with_price = sum(1 for a in ads if a["price"])
+    lines.append(f"Con prezzo: {with_price} · con descrizione: {with_desc} · con foto: {with_img}")
+    for a in ads[:5]:
+        lines.append(f"• {esc(a['title'][:60])} — {a['price']}€ · {esc(a['date'])} ({len(a['images'])} foto)")
+    tg.send(chat, "\n".join(lines))
+
+
 def run_test(chat):
+    if apify_source.enabled():
+        return run_test_apify(chat)
     s = subito.make_session()
     lines = ["🔎 <b>Test lettura Subito</b>"]
     for name, url in load_links():
@@ -134,11 +151,18 @@ def run_scan(chat, only=None):
     tg.send(chat, f"🚀 Scansione avviata su {len(links)} ricerca/e (obiettivo ~{TARGET_ADS} annunci ciascuna). Ci vorranno alcuni minuti.")
 
     s = subito.make_session()
+    use_apify = apify_source.enabled()
+    apify_cost = 0.0
     all_ads, seen = [], set()
     for name, url in links:
-        ads, status = subito.fetch_all(s, url, target=TARGET_ADS, progress=lambda m: tg.send(chat, f"{name}: {m}"))
+        if use_apify:
+            ads, cost, err = apify_source.scrape(url, TARGET_ADS)
+            apify_cost += cost
+            status = err or "ok"
+        else:
+            ads, status = subito.fetch_all(s, url, target=TARGET_ADS, progress=lambda m: tg.send(chat, f"{name}: {m}"))
         if not ads:
-            tg.send(chat, f"⚠️ {esc(name)}: nessun annuncio letto (HTTP {status}). Provo con /test per capire.")
+            tg.send(chat, f"⚠️ {esc(name)}: nessun annuncio letto ({esc(status)}). Prova /test per capire.")
         new = [a for a in ads if a["id"] not in seen]
         seen.update(a["id"] for a in new)
         all_ads.extend(new)
@@ -171,7 +195,7 @@ def run_scan(chat, only=None):
         if spend.usd >= MAX_USD_PER_SCAN:
             tg.send(chat, f"⛔ Tetto di spesa per scansione raggiunto (${spend.usd:.2f}). Mi fermo qui.")
             break
-        detail = subito.fetch_detail(s, a["url"])
+        detail = None if use_apify else subito.fetch_detail(s, a["url"])
         if detail:
             for k in ("body", "features", "images"):
                 if detail.get(k):
@@ -187,7 +211,7 @@ def run_scan(chat, only=None):
 
     deals.sort(key=lambda x: -x[0])
     mins = (time.time() - t0) / 60
-    summary = f"\n📊 Letti {len(all_ads)} · analizzati a fondo {analyzed} · costo AI ≈ ${spend.usd:.2f} · {mins:.0f} min"
+    summary = f"\n📊 Letti {len(all_ads)} · analizzati a fondo {analyzed} · costo AI ≈ ${spend.usd:.2f} · lettura Subito ≈ ${apify_cost:.2f} · {mins:.0f} min"
     if not deals:
         tg.send(chat, f"😶 Nessun affare con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}% in questa scansione." + summary)
         return
