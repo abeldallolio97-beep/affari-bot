@@ -471,8 +471,8 @@ def run_poll():
             run_scan(chat, arg.strip() or None)
         elif cmd == "/test":
             run_test(chat)
-        else:
-            tg.send(chat, HELP)
+        else:  # /start, /help, /menu o qualsiasi altro testo: mostra i tasti
+            tg.send(chat, HELP, keyboard=tg.MENU)
 
 
 if __name__ == "__main__":

@@ -12,8 +12,20 @@ def esc(s):
     return html.escape(str(s if s is not None else ""), quote=False)
 
 
-def send(chat_id, text, preview=False):
-    """Invia testo HTML, spezzandolo se supera il limite di Telegram."""
+MENU = {
+    "keyboard": [
+        ["/scan console", "/scan elettronica"],
+        ["/scan casa", "/scan"],
+        ["/ri", "/help"],
+    ],
+    "resize_keyboard": True,
+    "is_persistent": True,
+}
+
+
+def send(chat_id, text, preview=False, keyboard=None):
+    """Invia testo HTML, spezzandolo se supera il limite di Telegram.
+    Con keyboard=MENU mostra i tasti fissi in basso (restano finché non li cambi)."""
     chunks, cur = [], ""
     for line in text.split("\n"):
         if len(cur) + len(line) + 1 > 3800:
@@ -22,23 +34,21 @@ def send(chat_id, text, preview=False):
         cur += line + "\n"
     if cur.strip():
         chunks.append(cur)
-    for c in chunks:
-        r = requests.post(
-            f"{BASE}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": c,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": not preview,
-            },
-            timeout=30,
-        )
+    for i, c in enumerate(chunks):
+        payload = {
+            "chat_id": chat_id,
+            "text": c,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": not preview,
+        }
+        if keyboard and i == len(chunks) - 1:
+            payload["reply_markup"] = keyboard
+        r = requests.post(f"{BASE}/sendMessage", json=payload, timeout=30)
         if not r.ok:  # riprova senza formattazione
-            requests.post(
-                f"{BASE}/sendMessage",
-                json={"chat_id": chat_id, "text": html.unescape(c)},
-                timeout=30,
-            )
+            fallback = {"chat_id": chat_id, "text": html.unescape(c)}
+            if "reply_markup" in payload:
+                fallback["reply_markup"] = payload["reply_markup"]
+            requests.post(f"{BASE}/sendMessage", json=fallback, timeout=30)
 
 
 def get_updates(offset=None):
