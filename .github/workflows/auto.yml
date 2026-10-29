@@ -2,8 +2,8 @@ name: scansione-automatica
 
 on:
   schedule:
-    # ogni lunedì alle 06:13 UTC (07:13 ora italiana d'inverno)
-    - cron: "13 6 * * 1"
+    # ogni mercoledì alle 16:00 UTC (17:00 ora italiana d'inverno; con l'ora legale diventano le 18:00)
+    - cron: "0 16 * * 3"
   workflow_dispatch:
 
 concurrency:

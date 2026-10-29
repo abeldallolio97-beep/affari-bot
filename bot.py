@@ -81,14 +81,16 @@ def load_links(only=None, auto_only=False):
     return links
 
 
-def weekly_spent():
-    """Dollari spesi (lettura + AI) negli ultimi 7 giorni, dal registro state/log.csv."""
+def weekly_spent(kind=None):
+    """Dollari spesi (lettura + AI) negli ultimi 7 giorni, dal registro state/log.csv (kind='auto': solo scansioni automatiche)."""
     import csv
 
     total, now = 0.0, datetime.now(timezone.utc)
     try:
         with open(LOG_PATH, encoding="utf-8") as f:
             for r in csv.DictReader(f):
+                if kind and r.get("kind") != kind:
+                    continue
                 try:
                     when = datetime.fromisoformat(r["when_utc"])
                     if (now - when).total_seconds() <= 7 * 86400:
@@ -279,7 +281,7 @@ def run_scan(chat, only=None, auto=False):
     if not links:
         tg.send(chat, "Nessun link trovato in links.txt per quella ricerca.")
         return
-    spent = weekly_spent()
+    spent = weekly_spent("auto")
     if auto and spent >= WEEKLY_BUDGET_USD:
         tg.send(chat, f"⏸️ Scansione automatica saltata: spesi ${spent:.2f} negli ultimi 7 giorni, tetto ${WEEKLY_BUDGET_USD:.2f}.")
         return
