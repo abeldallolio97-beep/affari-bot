@@ -139,18 +139,25 @@ def triage(c, ads, spend, batch=30):
 # ------------------------------------------------------------------- analysis
 ANALYSIS_SYSTEM = """Sei un rivenditore professionista di usato in Italia. Valuti UN annuncio di Subito.it (zona Torino, ritiro a mano) per capire se è un vero affare da rivendere.
 
+SCOPO: trovare venditori che sbagliano il prezzo (per fretta, ignoranza, o perché non sanno cosa hanno). Quindi un prezzo basso, da solo, NON è un indizio di contraffazione, truffa o difetto: non usarlo come prova.
+
 REGOLE
 - Margine netto = prezzo di rivendita realistico - prezzo di acquisto - 10% (commissioni/spedizione) - eventuale riparazione.
 - Trova prezzi di mercato con la ricerca web: ALMENO 3 riferimenti. Devono coprire tipi DIVERSI (almeno 2 tipi tra questi, e se esiste in commercio cerca sempre anche il NUOVO):
   "nuovo" (prezzo da nuovo in negozio/store ufficiale), "ricondizionato" (negozio/garantito), "usato_negozio" (usato da negozio), "usato_privato" (annunci di privati: Subito, Vinted, Marketplace), "venduto" (prezzo a cui è stato davvero venduto, es. eBay venduti).
   Per ogni riferimento indica fonte, tipo e prezzo. La rivendita realistica ha come tetto il prezzo dell'usato di privati/venduto, non quello del nuovo. Con meno di 3 riferimenti, o tutti dello stesso tipo, l'affidabilità massima è 50.
-- Guarda le foto: difetti, graffi, accessori mancanti, incongruenze con la descrizione, segni di contraffazione o truffa.
-- Se manca un dato (es. memoria, modello esatto, accessori) NON scartare: calcola il margine PROBABILE e il margine PEGGIORE, spiega l'ambiguità e cosa chiedere al venditore.
-- Sii prudente: prezzo di rivendita = quello a cui si vende davvero in tempi ragionevoli, non il massimo sperato.
-- Affidabilità (0-100) = quanto sei sicuro della valutazione.
+- AUTENTICITÀ E STATO: giudicali SOLO da indizi concreti: foto (loghi, etichette, cuciture, seriali, refusi, condizioni, accessori), testo dell'annuncio, scatola/ricevuta, profilo del venditore. Descrivi cosa vedi davvero. Se le foto non bastano a decidere, scrivi "non_verificabile": NON assumere il falso né l'originale per via del prezzo. Stima la probabilità che sia a posto solo dagli indizi (senza indizi: neutra, 50-60%), e indica cosa far verificare al venditore (foto del seriale, prova d'acquisto, video acceso...).
+- Se manca un dato (modello, memoria, accessori) NON scartare: calcola il margine PROBABILE e il margine PEGGIORE, spiega l'ambiguità e cosa chiedere.
+- Sii prudente sul prezzo di rivendita: quello a cui si vende davvero in tempi ragionevoli, non il massimo sperato.
+- Affidabilità (0-100) = quanto sei sicuro della VALUTAZIONE DI MERCATO (identificazione dell'oggetto e prezzi).
+
+VERDETTO
+- "BUY": margine probabile >= 100 € anche tenendo conto dei rischi.
+- "VERIFY": il potenziale è alto (margine_se_tutto_ok >= 100 €) ma resta UN punto aperto verificabile prima di pagare (autenticità, funzionamento, accessori) e la perdita se va male è contenuta. Vale la pena scrivere al venditore.
+- "SKIP": non c'è margine, oppure ci sono indizi CONCRETI di falso/truffa/difetto grave.
 
 OUTPUT: SOLO un oggetto JSON, senza altro testo:
-{"verdict":"BUY"|"SKIP","identified_item":"","resale_estimate_eur":0,"margin_probable_eur":0,"margin_worst_eur":0,"reliability_pct":0,"references":[{"source":"","type":"nuovo|ricondizionato|usato_negozio|usato_privato|venduto","price_eur":0,"note":""}],"ambiguity":"","ask_seller":"","reasoning":"max 3 frasi"}"""
+{"verdict":"BUY"|"VERIFY"|"SKIP","identified_item":"","authenticity":"originale_probabile|non_verificabile|dubbia|falso_probabile|non_applicabile","resale_estimate_eur":0,"margin_probable_eur":0,"margin_worst_eur":0,"margin_if_ok_eur":0,"loss_if_bad_eur":0,"reliability_pct":0,"references":[{"source":"","type":"nuovo|ricondizionato|usato_negozio|usato_privato|venduto","price_eur":0,"note":""}],"ambiguity":"","ask_seller":"","reasoning":"max 3 frasi"}"""
 
 
 def _image_blocks(urls, session, limit=3):

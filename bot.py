@@ -29,6 +29,7 @@ MIN_VALUE = int(os.getenv("MIN_VALUE", "150"))             # scarta se rivendita
 TARGET_ADS = int(os.getenv("TARGET_ADS", "1000"))          # annunci per link
 MAX_FINALISTS = int(os.getenv("MAX_FINALISTS", "5"))      # analisi a fondo per scansione
 MAX_USD_PER_SCAN = float(os.getenv("MAX_USD_PER_SCAN", "1"))  # tetto di spesa per scansione
+VERIFY_MAX_LOSS = int(os.getenv("VERIFY_MAX_LOSS", "150"))      # perdita massima accettata per "da verificare"
 TRIAGE_MARGIN = int(os.getenv("TRIAGE_MARGIN", "90"))      # soglia larga del triage
 RANK_SHOW = int(os.getenv("RANK_SHOW", "100"))              # righe della classifica veloce
 MAX_AGE_DAYS = float(os.getenv("MAX_AGE_DAYS", "3"))        # ignora annunci più vecchi di N giorni
@@ -124,7 +125,7 @@ def passes_rules(a):
 
 
 def validate(v, price):
-    """Applica i criteri dell'utente al verdetto dell'AI. Ritorna (ok, v)."""
+    """Applica i criteri dell'utente al verdetto dell'AI. Ritorna (stato, v): 'buy', 'verify' o None."""
     try:
         refs = v.get("references") or []
         n_refs = len([r for r in refs if isinstance(r, dict) and r.get("price_eur")])
@@ -134,17 +135,25 @@ def validate(v, price):
         if n_refs < MIN_REFS or len(types) < 2:  # servono 3 prezzi e almeno 2 tipi diversi (nuovo/usato...)
             rel = min(rel, 50)
         v["reliability_pct"] = rel
+        verdict = str(v.get("verdict", "")).upper()
         probable = float(v.get("margin_probable_eur") or 0)
         worst = float(v.get("margin_worst_eur") or 0)
-        ok = (
-            str(v.get("verdict", "")).upper() == "BUY"
-            and probable >= MIN_MARGIN
-            and worst >= 0
-            and rel >= MIN_RELIABILITY
-        )
-        return ok, v
+        if verdict == "BUY" and probable >= MIN_MARGIN and worst >= 0 and rel >= MIN_RELIABILITY:
+            return "buy", v
+        if_ok = float(v.get("margin_if_ok_eur") or 0)
+        loss = abs(float(v.get("loss_if_bad_eur") or 0))
+        if verdict in ("VERIFY", "BUY") and if_ok >= MIN_MARGIN and rel >= MIN_RELIABILITY and loss <= max(VERIFY_MAX_LOSS, 0):
+            return "verify", v
+        return None, v
     except (TypeError, ValueError):
-        return False, v
+        return None, v
+
+
+STATUS_LABEL = {
+    "buy": "✅ AFFARE (rispetta i tuoi criteri)",
+    "verify": "🟡 DA VERIFICARE: potenziale alto, un punto aperto da chiarire col venditore",
+    None: "❌ NON rispetta i tuoi criteri",
+}
 
 
 def format_deal(rank, ad, v):
@@ -160,6 +169,13 @@ def format_deal(rank, ad, v):
         f"🎯 Affidabilità {v.get('reliability_pct')}% · {esc(ad.get('town'))} · {esc(ad.get('date'))}",
         f"📊 Riferimenti: {refs or 'n/d'}",
     ]
+    if v.get("authenticity") and v.get("authenticity") != "non_applicabile":
+        out.append(f"🔎 Autenticità/stato: {esc(str(v['authenticity']).replace('_', ' '))}")
+    if v.get("margin_if_ok_eur") is not None and v.get("loss_if_bad_eur") is not None:
+        try:
+            out.append(f"⚖️ Se tutto ok: +{round(float(v['margin_if_ok_eur']))}€ · se va male: -{abs(round(float(v['loss_if_bad_eur'])))}€")
+        except (TypeError, ValueError):
+            pass
     if v.get("ambiguity"):
         out.append(f"⚠️ Ambiguità: {esc(v['ambiguity'])}")
     if v.get("ask_seller"):
@@ -267,9 +283,10 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
         analyzed += 1
         if not v:
             continue
-        ok, v = validate(v, a["price"])
-        if ok:
-            deals.append((float(v.get("margin_probable_eur", 0)), a, v))
+        status, v = validate(v, a["price"])
+        if status:
+            score = float(v.get("margin_probable_eur", 0)) if status == "buy" else float(v.get("margin_if_ok_eur", 0)) / 2
+            deals.append((score + (10000 if status == "buy" else 0), a, v, status))
         time.sleep(0.5)
 
     deals.sort(key=lambda x: -x[0])
@@ -279,9 +296,10 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
         tg.send(chat, f"😶 Nessun affare VERIFICATO con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}% in questa scansione. "
                       f"La classifica veloce qui sopra resta solo indicativa (stime non verificate)." + summary)
         return
-    tg.send(chat, f"🏆 <b>{len(deals)} affari VERIFICATI</b> (margine ≥ {MIN_MARGIN}€), dal migliore:" + summary)
-    for rank, (_, a, v) in enumerate(deals, 1):
-        tg.send(chat, format_deal(rank, a, v))
+    n_buy = sum(1 for d in deals if d[3] == "buy")
+    tg.send(chat, f"🏆 <b>{n_buy} affari verificati</b> e <b>{len(deals) - n_buy} da verificare</b> (margine ≥ {MIN_MARGIN}€), dal migliore:" + summary)
+    for rank, (_, a, v, status) in enumerate(deals, 1):
+        tg.send(chat, STATUS_LABEL[status] + "\n" + format_deal(rank, a, v))
 
 
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "ranking.json")
@@ -392,9 +410,8 @@ def run_analyze(chat, arg):
         if not v:
             tg.send(chat, "L'analisi non ha prodotto un risultato. Riprova.")
             continue
-        ok, v = validate(v, ad["price"])
-        verdict = "✅ rispetta i tuoi criteri" if ok else "❌ NON rispetta i tuoi criteri (margine/affidabilità/riferimenti)"
-        tg.send(chat, f"{verdict}\n" + format_deal(1, ad, v))
+        status, v = validate(v, ad["price"])
+        tg.send(chat, STATUS_LABEL[status] + "\n" + format_deal(1, ad, v))
     tg.send(chat, f"💡 Costo AI ≈ ${spend.usd:.2f} · lettura ≈ ${apify_cost:.3f} · {(time.time() - t0) / 60:.0f} min")
 
 
