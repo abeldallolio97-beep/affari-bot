@@ -4,3 +4,4 @@ casa e persona | https://www.subito.it/annunci-piemonte/vendita/casa-e-persona/t
 console e videogiochi italia spedizione | https://www.subito.it/annunci-italia/vendita/videogiochi/?shp=true&order=datedesc&ps=60&pe=800
 fotografia italia spedizione | https://www.subito.it/annunci-italia/vendita/fotografia/?shp=true&order=datedesc&ps=150&pe=1500 | auto
 fotografia torino | https://www.subito.it/annunci-piemonte/vendita/fotografia/torino/torino/?order=datedesc&ps=100 | auto
+vinted carte collezionabili | https://www.vinted.it/catalog?catalog[]=4824&order=newest_first

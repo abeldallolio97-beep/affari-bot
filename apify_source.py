@@ -58,9 +58,12 @@ def normalize(it):
     }
 
 
-def scrape(url, max_items, wait_minutes=40):
-    """Lancia l'actor sul link di ricerca e restituisce (annunci, costo_usd, errore)."""
-    body = {
+def scrape(url, max_items, wait_minutes=40, actor=None, payload=None, norm=None):
+    """Lancia l'actor sul link di ricerca e restituisce (annunci, costo_usd, errore).
+    Di default legge Subito; con actor/payload/norm si può leggere un'altra fonte (es. Vinted)."""
+    actor = actor or ACTOR
+    norm = norm or normalize
+    body = payload or {
         "startUrls": [url],
         "maxItemsPerQuery": max_items,
         "enrichPhone": False,
@@ -70,7 +73,7 @@ def scrape(url, max_items, wait_minutes=40):
     }
     try:
         r = requests.post(
-            f"{API}/acts/{ACTOR}/runs",
+            f"{API}/acts/{actor}/runs",
             params={"token": TOKEN, "maxTotalChargeUsd": MAX_USD},
             json=body,
             timeout=60,
@@ -107,8 +110,8 @@ def scrape(url, max_items, wait_minutes=40):
     for it in items:
         if not isinstance(it, dict):
             continue
-        a = normalize(it)
-        if a["url"] and a["id"] not in seen:
+        a = norm(it)
+        if a and a["url"] and a["id"] not in seen:
             seen.add(a["id"])
             ads.append(a)
     err = None if status == "SUCCEEDED" else f"stato Apify: {status}"

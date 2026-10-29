@@ -13,6 +13,7 @@ import time
 from datetime import datetime, timezone
 
 import apify_source
+import vinted_source
 import subito
 import telegram_api as tg
 from telegram_api import esc
@@ -144,6 +145,21 @@ def run_test_apify(chat):
     with_price = sum(1 for a in ads if a["price"])
     lines.append(f"Con prezzo: {with_price} · con descrizione: {with_desc} · con foto: {with_img}")
     for a in ads[:5]:
+        lines.append(f"• {esc(a['title'][:60])} — {a['price']}€ · {esc(a['date'])} ({len(a['images'])} foto)")
+    tg.send(chat, "\n".join(lines))
+
+
+def run_test_vinted(chat):
+    links = [(n, u) for n, u in load_links() if vinted_source.is_vinted(u)]
+    if not links:
+        tg.send(chat, "Nessun link di Vinted in links.txt.")
+        return
+    name, url = links[0]
+    tg.send(chat, f"🔎 Test lettura Vinted su «{esc(name)}» (30 annunci)…")
+    ads, cost, err = vinted_source.scrape(url, 30, wait_minutes=10)
+    lines = [f"Annunci letti: <b>{len(ads)}</b> · costo ${cost:.3f}" + (f" · ⚠️ {esc(err)}" if err else "")]
+    lines.append(f"Con prezzo: {sum(1 for a in ads if a['price'])} · con descrizione: {sum(1 for a in ads if a['body'])} · con foto: {sum(1 for a in ads if a['images'])} · con data: {sum(1 for a in ads if a['date'])}")
+    for a in ads[:6]:
         lines.append(f"• {esc(a['title'][:60])} — {a['price']}€ · {esc(a['date'])} ({len(a['images'])} foto)")
     tg.send(chat, "\n".join(lines))
 
@@ -302,7 +318,8 @@ def run_scan(chat, only=None, auto=False):
     all_ads, seen = [], set()
     for name, url in links:
         if use_apify:
-            ads, cost, err = apify_source.scrape(url, TARGET_ADS)
+            reader = vinted_source.scrape if vinted_source.is_vinted(url) else apify_source.scrape
+            ads, cost, err = reader(url, TARGET_ADS)
             apify_cost += cost
             status = err or "ok"
         else:
@@ -578,6 +595,8 @@ def run_poll():
             run_rescan(chat)
         elif cmd == "/scan":
             run_scan(chat, arg.strip() or None)
+        elif cmd == "/testvinted":
+            run_test_vinted(chat)
         elif cmd == "/test":
             run_test(chat)
         else:  # /start, /help, /menu o qualsiasi altro testo: mostra i tasti

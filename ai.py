@@ -140,11 +140,12 @@ def triage(c, ads, spend, batch=30):
 
 
 # ------------------------------------------------------------------- analysis
-ANALYSIS_SYSTEM = """Sei un rivenditore professionista di usato in Italia. Valuti UN annuncio di Subito.it (zona Torino, ritiro a mano) per capire se è un vero affare da rivendere.
+ANALYSIS_SYSTEM = """Sei un rivenditore professionista di usato in Italia. Valuti UN annuncio di Subito.it (zona Torino, ritiro a mano o spedizione) o di Vinted per capire se è un vero affare da rivendere.
 
 SCOPO: trovare venditori che sbagliano il prezzo (per fretta, ignoranza, o perché non sanno cosa hanno). Quindi un prezzo basso, da solo, NON è un indizio di contraffazione, truffa o difetto: non usarlo come prova.
 
 REGOLE
+- Se la fonte è Vinted (campo "fonte: Vinted"): si compra con spedizione, quindi al costo si aggiungono la commissione di protezione acquirente di Vinted (circa 5% + 0,70 €, da considerare approssimata) e la spedizione; si rivende su Subito, Vinted o Cardmarket. Per carte collezionabili usa come riferimenti Cardmarket e i venduti eBay; attenzione a carte false e a prodotti sigillati risigillati: chiedi foto nitide di sigilli/retro e codici.
 - Margine netto = prezzo di rivendita realistico - prezzo di acquisto - 10% (commissioni/spedizione) - eventuale riparazione.
 - Trova prezzi di mercato con la ricerca web: ALMENO 3 riferimenti. Devono coprire tipi DIVERSI (almeno 2 tipi tra questi, e se esiste in commercio cerca sempre anche il NUOVO):
   "nuovo" (prezzo da nuovo in negozio/store ufficiale), "ricondizionato" (negozio/garantito), "usato_negozio" (usato da negozio), "usato_privato" (annunci di privati: Subito, Vinted, Marketplace), "venduto" (prezzo a cui è stato davvero venduto, es. eBay venduti).
