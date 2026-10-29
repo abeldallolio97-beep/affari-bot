@@ -293,7 +293,8 @@ def run_scan(chat, only=None, auto=False):
         return
     LAST_RUN.clear()
     LAST_RUN["quiet"] = True
-    info(chat, f"🚀 {'Scansione automatica' if auto else 'Scansione'} avviata su {len(links)} ricerca/e (~{TARGET_ADS} annunci ciascuna). Ci vorranno alcuni minuti.")
+    LAST_RUN["per_link"] = []
+    tg.send(chat, f"🚀 <b>SCANSIONE AVVIATA</b> ({'automatica' if auto else 'manuale'}) su {len(links)} ricerca/e: {esc(', '.join(n for n, _ in links))}. Ci vorranno circa 10–15 minuti.")
 
     s = subito.make_session()
     use_apify = apify_source.enabled()
@@ -311,6 +312,7 @@ def run_scan(chat, only=None, auto=False):
         new = [a for a in ads if a["id"] not in seen]
         seen.update(a["id"] for a in new)
         all_ads.extend(new)
+        LAST_RUN.setdefault("per_link", []).append(f"• {esc(name)}: {len(ads)} annunci")
         info(chat, f"✅ {esc(name)}: {len(ads)} annunci letti")
     if not all_ads:
         log_run("auto" if auto else "scan", links, 0, apify_cost)
@@ -359,6 +361,15 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
     lt = ai.LAST_TRIAGE
     LAST_RUN["tri"] = (f"{lt['items']}/{len(candidates)} valutati, errori API {lt['api_errors']}, "
                        f"risposte illeggibili {lt['parse_failures']}, costo AI veloce ${spend.usd:.2f}")
+    if LAST_RUN.get("quiet"):
+        tg.send(
+            chat,
+            "📥 <b>RECAP ANNUNCI LETTI</b>\n" + "\n".join(LAST_RUN.get("per_link", [])) +
+            f"\nTotale: {len(all_ads)} annunci letti, {len(candidates)} dopo i filtri di prezzo ({MIN_PRICE}-{MAX_PRICE}€), "
+            f"età (max {MAX_AGE_DAYS:g} giorni) e categorie facili da falsificare.\n{esc(age_stats(all_ads))}.\n"
+            f"Valutazione veloce con l'AI: {lt['items']}/{len(candidates)} annunci valutati, {len(ranked)} con un valore stimato "
+            f"(errori API {lt['api_errors']}, risposte illeggibili {lt['parse_failures']}). Costo finora ≈ ${spend.usd:.2f}.",
+        )
     info(
         chat,
         f"🧪 Valutazione veloce: {lt['items']}/{len(candidates)} annunci valutati, {len(ranked)} con un valore stimato "
@@ -407,14 +418,14 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
     mins = (time.time() - t0) / 60
     summary = f"\n📊 Letti {len(all_ads)} · analizzati a fondo {analyzed} · costo AI ≈ ${spend.usd:.2f} · lettura Subito ≈ ${apify_cost:.2f} · {mins:.0f} min"
     if not deals:
-        text = (f"🎯 <b>MESSAGGIO 2 · Affari pronti</b>\n😶 Controllo fatto: nessun affare pronto da rivendere (senza test né riparazioni) con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}%. "
-                f"La lista del messaggio 1 resta solo indicativa (stime non verificate)." + summary)
+        text = (f"🎯 <b>AFFARI DA CONCLUDERE</b>\n😶 Controllo fatto: nessun affare pronto da rivendere (senza test né riparazioni) con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}%. "
+                f"La lista dei risultati qui sopra resta solo indicativa (stime non verificate)." + summary)
         if scartati:
             text += "\n\n🔎 <b>Perché sono stati scartati i " + str(len(scartati)) + " analizzati a fondo:</b>\n\n" + "\n\n".join(scartati)
         tg.send(chat, text)
         return
     n_buy = sum(1 for d in deals if d[3] == "buy")
-    tg.send(chat, f"🎯 <b>MESSAGGIO 2 · Affari pronti</b>\n🏆 <b>{n_buy} affari verificati</b> e <b>{len(deals) - n_buy} da verificare</b> (margine ≥ {MIN_MARGIN}€), dal migliore:" + summary)
+    tg.send(chat, f"🎯 <b>AFFARI DA CONCLUDERE</b>\n🏆 <b>{n_buy} affari verificati</b> e <b>{len(deals) - n_buy} da verificare</b> (margine ≥ {MIN_MARGIN}€), dal migliore:" + summary)
     for rank, (_, a, v, status) in enumerate(deals, 1):
         tg.send(chat, STATUS_LABEL[status] + "\n" + format_deal(rank, a, v))
 
@@ -450,11 +461,9 @@ def send_ranking(chat, ranked):
     if not top:
         tg.send(chat, "Nessun annuncio con un valore stimato.")
         return
-    lines = [f"📋 <b>MESSAGGIO 1 · Annunci da guardare quando hai tempo</b> (top {len(top)}, dal migliore)."]
-    if LAST_RUN.get("head"):
-        lines.append(esc(LAST_RUN["head"]) + ".")
-    lines.append("Sono stime NON verificate: prezzo → rivendita stimata, margine al netto del 10%, confidenza dell'AI. "
-                 "Gli affari veri sono nel messaggio 2.\n")
+    lines = [f"📋 <b>RISULTATI</b> (top {len(top)}, dal migliore al peggiore). Sono stime NON verificate: "
+             "prezzo → rivendita stimata, margine al netto del 10%, confidenza dell'AI. Da guardare con calma; "
+             "gli affari veri sono nell'ultimo messaggio.\n"]
     for n, (_, est, v, conf, note, a) in enumerate(top, 1):
         title = esc(a["title"][:45])
         url = _html.escape(a["url"] or "", quote=True)
