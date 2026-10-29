@@ -10,6 +10,9 @@ concurrency:
   group: bot
   cancel-in-progress: false
 
+permissions:
+  contents: write
+
 jobs:
   run:
     runs-on: ubuntu-latest
@@ -27,3 +30,14 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      - name: salva stato
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain state 2>/dev/null)" ]; then
+            git config user.name "affari-bot"
+            git config user.email "affari-bot@users.noreply.github.com"
+            git add state
+            git commit -q -m "stato: classifica"
+            git pull -q --rebase origin main || true
+            git push -q origin HEAD:main || true
+          fi

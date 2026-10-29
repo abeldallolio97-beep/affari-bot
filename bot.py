@@ -284,9 +284,34 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
         tg.send(chat, format_deal(rank, a, v))
 
 
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "ranking.json")
+
+
+def save_ranking(top):
+    """Memorizza la classifica (numero -> annuncio) così /analizza 2 5 3 funziona anche in un'altra esecuzione."""
+    import json
+
+    os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+    data = [{"n": n, "url": r[5]["url"], "title": r[5]["title"], "price": r[5]["price"]} for n, r in enumerate(top, 1)]
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+def load_ranking():
+    import json
+
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return {d["n"]: d for d in json.load(f)}
+    except (OSError, ValueError, KeyError):
+        return {}
+
+
 def send_ranking(chat, ranked):
     """Classifica veloce: i migliori RANK_SHOW annunci dal migliore al peggiore, con gli importi."""
     top = ranked[:RANK_SHOW]
+    if top:
+        save_ranking(top)
     if not top:
         tg.send(chat, "Nessun annuncio con un valore stimato.")
         return
@@ -300,7 +325,7 @@ def send_ranking(chat, ranked):
             + (f" · {esc(note[:40])}" if note else "")
         )
     tg.send(chat, "\n".join(lines))
-    tg.send(chat, "Per verificare a fondo uno di questi (foto + prezzi di mercato, costa circa 0,15 $) scrivi:\n/analizza <link dell'annuncio>")
+    tg.send(chat, "Per verificare a fondo uno o più annunci (foto + prezzi di mercato, circa 0,15 $ ciascuno) scrivi i loro NUMERI, per esempio:\n/analizza 2 5 3")
 
 
 def run_rescan(chat):
@@ -318,36 +343,66 @@ def run_rescan(chat):
     analyze_ads(chat, ads, 0.0, t0, True, subito.make_session(), deep=False)
 
 
-def run_analyze_one(chat, url):
-    """Analisi a fondo di UN annuncio scelto dall'utente (per link), dai dati già letti."""
+MAX_ANALYZE = 5
+
+
+def run_analyze(chat, arg):
+    """/analizza 2 5 3  (numeri della classifica)  oppure  /analizza <link>."""
     import ai
 
     t0 = time.time()
     if not os.environ.get("ANTHROPIC_API_KEY") or not apify_source.enabled():
         tg.send(chat, "Servono ANTHROPIC_API_KEY e APIFY_TOKEN.")
         return
-    key = url.split("?")[0].strip().rstrip("/")
-    ads, err = apify_source.latest_ads(len(load_links()))
-    found = next((a for a in ads if (a["url"] or "").split("?")[0].rstrip("/") == key), None)
-    if not found:
-        tg.send(chat, "Non trovo questo annuncio nelle ultime letture (forse è più vecchio o l'indirizzo non è completo). Fai /scan e riprova.")
+    ranking = load_ranking()
+    urls, bad = [], []
+    for tok in re.split(r"[\s,;]+", arg.strip()):
+        if not tok:
+            continue
+        if tok.isdigit():
+            d = ranking.get(int(tok))
+            (urls.append(d["url"]) if d else bad.append(tok))
+        elif tok.startswith("http"):
+            urls.append(tok)
+        else:
+            bad.append(tok)
+    if bad:
+        tg.send(chat, f"Non capisco o non trovo: {esc(', '.join(bad))}. Usa i numeri della classifica (fai prima /ri) o un link.")
+    urls = urls[:MAX_ANALYZE]
+    if not urls:
         return
-    tg.send(chat, f"🔬 Analizzo a fondo: {esc(found['title'][:60])} …")
-    c, spend = ai.client(), ai.Spend()
-    v = ai.analyze(c, found, subito.make_session(), spend)
-    if not v:
-        tg.send(chat, f"L'analisi non ha prodotto un risultato (costo ≈ ${spend.usd:.2f}). Riprova.")
-        return
-    ok, v = validate(v, found["price"])
-    verdict = "✅ rispetta i tuoi criteri" if ok else "❌ NON rispetta i tuoi criteri (margine/affidabilità/riferimenti)"
-    tg.send(chat, f"{verdict}\n" + format_deal(1, found, v) + f"Costo ≈ ${spend.usd:.2f} · {(time.time() - t0) / 60:.0f} min")
+    pool, _ = apify_source.latest_ads(len(load_links()))
+    index = {(a["url"] or "").split("?")[0].rstrip("/"): a for a in pool}
+    c, spend, s = ai.client(), ai.Spend(), subito.make_session()
+    apify_cost = 0.0
+    for url in urls:
+        key = url.split("?")[0].rstrip("/")
+        ad = index.get(key)
+        if not ad:
+            ad, cost, err = apify_source.scrape_one(url)
+            apify_cost += cost
+        if not ad:
+            tg.send(chat, f"Non riesco a leggere questo annuncio (forse è stato venduto o rimosso): {esc(url)}")
+            continue
+        if spend.usd >= MAX_USD_PER_SCAN * 2:
+            tg.send(chat, f"⛔ Tetto di spesa raggiunto (${spend.usd:.2f}).")
+            break
+        tg.send(chat, f"🔬 Analizzo a fondo: {esc(ad['title'][:60])} …")
+        v = ai.analyze(c, ad, s, spend)
+        if not v:
+            tg.send(chat, "L'analisi non ha prodotto un risultato. Riprova.")
+            continue
+        ok, v = validate(v, ad["price"])
+        verdict = "✅ rispetta i tuoi criteri" if ok else "❌ NON rispetta i tuoi criteri (margine/affidabilità/riferimenti)"
+        tg.send(chat, f"{verdict}\n" + format_deal(1, ad, v))
+    tg.send(chat, f"💡 Costo AI ≈ ${spend.usd:.2f} · lettura ≈ ${apify_cost:.3f} · {(time.time() - t0) / 60:.0f} min")
 
 
 # ----------------------------------------------------------------------- poll
 HELP = (
     "Comandi:\n/scan – scansione completa di tutte le ricerche\n"
     "/scan elettronica – solo una ricerca (nome in links.txt)\n"
-    "/analizza <link> – analisi a fondo di un annuncio (~0,15 $)\n/ri – rianalizza gli ultimi annunci già letti (non ripaga la lettura)\n/test – prova la lettura di Subito (senza AI)\n/help – questo messaggio"
+    "/analizza 2 5 3 – analisi a fondo degli annunci con quei numeri della classifica (~0,15 $ l'uno); accetta anche un link\n/ri – rianalizza gli ultimi annunci già letti (non ripaga la lettura)\n/test – prova la lettura di Subito (senza AI)\n/help – questo messaggio"
 )
 
 
@@ -371,7 +426,7 @@ def run_poll():
         cmd, _, arg = text.partition(" ")
         cmd = cmd.split("@")[0].lower()
         if cmd == "/analizza":
-            run_analyze_one(chat, arg.strip()) if arg.strip() else tg.send(chat, "Scrivi: /analizza <link dell'annuncio>")
+            run_analyze(chat, arg) if arg.strip() else tg.send(chat, "Scrivi per esempio: /analizza 2 5 3  (numeri della classifica)")
         elif cmd == "/ri":
             run_rescan(chat)
         elif cmd == "/scan":

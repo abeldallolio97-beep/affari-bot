@@ -142,3 +142,9 @@ def latest_ads(n_runs, hours=24):
                 seen.add(a["id"])
                 ads.append(a)
     return ads, None
+
+
+def scrape_one(url):
+    """Legge un singolo annuncio (se non è nelle ultime letture)."""
+    ads, cost, err = scrape(url, 1, wait_minutes=8)
+    return (ads[0] if ads else None), cost, err
