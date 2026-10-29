@@ -37,6 +37,21 @@ def client():
     return anthropic.Anthropic()
 
 
+def _json_objects(text):
+    """Tutti gli oggetti JSON validi trovati nel testo (anche dentro ```json o con testo attorno)."""
+    dec, out, i = json.JSONDecoder(), [], 0
+    while True:
+        i = text.find("{", i)
+        if i == -1:
+            return out
+        try:
+            obj, end = dec.raw_decode(text[i:])
+            out.append(obj)
+            i += end
+        except json.JSONDecodeError:
+            i += 1
+
+
 def _json_from(text, opener, closer):
     a, b = text.find(opener), text.rfind(closer)
     if a == -1 or b <= a:
@@ -50,24 +65,43 @@ def _json_from(text, opener, closer):
 # --------------------------------------------------------------------- triage
 TRIAGE_SYSTEM = (
     "Sei un rivenditore esperto del mercato dell'usato in Italia. Ti do annunci di "
-    "Subito.it (Torino). Per ciascuno stima a quanto lo si rivende REALISTICAMENTE "
-    "(prezzo di vendita usato in Italia, privati/Vinted/eBay), se ha un valore sensato. "
-    "Se è spazzatura, ricambi, un oggetto non identificabile o un annuncio di acquisto, "
-    "metti v=0. Se manca qualche dato (es. memoria) usa il caso più probabile e abbassa c. "
-    "Non essere ottimista: v è il prezzo a cui si vende davvero in poche settimane, in condizioni medie, non il massimo. "
-    "Se l'annuncio è un lotto, ha difetti dichiarati o è un oggetto raro/di difficile prezzo, abbassa c.\n"
-    "Rispondi SOLO con un array JSON, un elemento per annuncio: "
-    '[{"i":<numero>,"v":<rivendita stimata in euro>,"c":<confidenza 0-100>,"n":"<max 8 parole>"}]'
+    "Subito.it (Torino), uno per riga nel formato: numero|prezzo|titolo|caratteristiche|descrizione. "
+    "Per ciascuno stima a quanto lo si rivende REALISTICAMENTE (prezzo di vendita usato in Italia, "
+    "privati/Vinted/eBay), se ha un valore sensato. Se è spazzatura, ricambi, un oggetto non identificabile "
+    "o un annuncio di acquisto, metti valore 0. Se manca qualche dato (es. memoria) usa il caso più probabile "
+    "e abbassa la confidenza. Non essere ottimista: il valore è il prezzo a cui si vende davvero in poche "
+    "settimane, in condizioni medie, non il massimo. Se è un lotto, ha difetti dichiarati o è un oggetto raro "
+    "e di difficile prezzo, abbassa la confidenza.\n"
+    "RISPOSTA: SOLO una riga per annuncio, nello stesso ordine, nel formato esatto\n"
+    "numero|valore_di_rivendita_in_euro|confidenza_0_100|nota di massimo 6 parole\n"
+    "Esempio: 12|320|70|iPhone 13 128GB probabile\n"
+    "Niente altro testo, niente titoli, niente markdown."
 )
 
+_LINE = re.compile(r"^\s*(\d+)\s*\|\s*~?(\d+(?:[.,]\d+)?)\s*(?:€|eur\w*)?\s*\|\s*(\d+)\s*%?\s*(?:\|(.*))?$", re.I)
 
-LAST_TRIAGE = {"batches": 0, "api_errors": 0, "parse_failures": 0, "items": 0}
+
+def parse_triage(text):
+    """Legge le righe 'numero|valore|confidenza|nota'. Restituisce {indice: {v,c,n}}."""
+    out = {}
+    for line in text.splitlines():
+        m = _LINE.match(line.replace("`", ""))
+        if m:
+            out[int(m.group(1))] = {
+                "v": float(m.group(2).replace(",", ".")),
+                "c": float(m.group(3)),
+                "n": (m.group(4) or "").strip(),
+            }
+    return out
+
+
+LAST_TRIAGE = {"batches": 0, "api_errors": 0, "parse_failures": 0, "items": 0, "sample": ""}
 
 
 def triage(c, ads, spend, batch=30):
     """Restituisce {indice_annuncio: {v, c, n}} per tutti gli annunci."""
     out = {}
-    LAST_TRIAGE.update(batches=0, api_errors=0, parse_failures=0, items=0)
+    LAST_TRIAGE.update(batches=0, api_errors=0, parse_failures=0, items=0, sample="")
     for start in range(0, len(ads), batch):
         chunk = ads[start : start + batch]
         lines = []
@@ -79,7 +113,7 @@ def triage(c, ads, spend, batch=30):
         try:
             r = c.messages.create(
                 model=TRIAGE_MODEL,
-                max_tokens=2500,
+                max_tokens=3000,
                 system=TRIAGE_SYSTEM,
                 messages=[{"role": "user", "content": "\n".join(lines)}],
             )
@@ -90,17 +124,15 @@ def triage(c, ads, spend, batch=30):
         LAST_TRIAGE["batches"] += 1
         spend.add(TRIAGE_MODEL, r.usage)
         text = "".join(b.text for b in r.content if b.type == "text")
-        arr = _json_from(text, "[", "]")
-        if arr is None:
+        parsed = parse_triage(text)
+        if not parsed:
             LAST_TRIAGE["parse_failures"] += 1
+            if not LAST_TRIAGE["sample"]:
+                LAST_TRIAGE["sample"] = text[:300]
             print("triage: risposta non leggibile:", text[:300])
             continue
-        for item in arr:
-            try:
-                out[int(item["i"])] = item
-                LAST_TRIAGE["items"] += 1
-            except (KeyError, TypeError, ValueError):
-                continue
+        out.update(parsed)
+        LAST_TRIAGE["items"] += len(parsed)
     return out
 
 
@@ -184,4 +216,8 @@ def analyze(c, ad, session, spend):
     if resp is None:
         return None
     text_out = "".join(b.text for b in resp.content if b.type == "text")
-    return _json_from(text_out, "{", "}")
+    cands = [o for o in _json_objects(text_out) if isinstance(o, dict) and "verdict" in o]
+    if not cands:
+        print("analisi: risposta non leggibile:", text_out[:400])
+        return None
+    return cands[-1]

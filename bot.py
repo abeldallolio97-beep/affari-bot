@@ -203,7 +203,7 @@ def run_scan(chat, only=None):
     analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s)
 
 
-def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s):
+def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
     import ai
 
     candidates = [a for a in all_ads if passes_rules(a)]
@@ -242,10 +242,15 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s):
         f"🧪 Valutazione veloce: {lt['items']}/{len(candidates)} annunci valutati, {len(ranked)} con un valore stimato "
         f"(errori API {lt['api_errors']}, risposte illeggibili {lt['parse_failures']}) · costo ≈ ${spend.usd:.2f}",
     )
+    if lt["sample"]:
+        tg.send(chat, "Esempio di risposta che non riesco a leggere:\n" + esc(lt["sample"]))
     send_ranking(chat, ranked)
 
     # analisi a fondo (costosa) solo per i pochi candidati che superano le soglie
-    finalists = [r[5] for r in ranked if r[2] >= MIN_VALUE and r[1] >= TRIAGE_MARGIN][:MAX_FINALISTS]
+    finalists = [r[5] for r in ranked if r[2] >= MIN_VALUE and r[1] >= TRIAGE_MARGIN][:MAX_FINALISTS] if deep else []
+    if not deep:
+        tg.send(chat, f"💡 Costo totale ≈ ${spend.usd:.2f}. Per verificare a fondo un annuncio: /analizza <link>.")
+        return
     deals, analyzed = [], 0
     if finalists:
         tg.send(chat, f"🔬 Analisi a fondo (foto + prezzi di mercato) dei {len(finalists)} più promettenti…")
@@ -310,7 +315,7 @@ def run_rescan(chat):
     if not ads:
         tg.send(chat, f"Nessun dato recente trovato ({esc(err or 'vuoto')}). Fai prima /scan.")
         return
-    analyze_ads(chat, ads, 0.0, t0, True, subito.make_session())
+    analyze_ads(chat, ads, 0.0, t0, True, subito.make_session(), deep=False)
 
 
 def run_analyze_one(chat, url):
