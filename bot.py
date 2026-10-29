@@ -288,7 +288,7 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
     if not deep:
         tg.send(chat, f"💡 Costo totale ≈ ${spend.usd:.2f}. Per verificare a fondo un annuncio: /analizza <link>.")
         return
-    deals, analyzed = [], 0
+    deals, analyzed, scartati = [], 0, []
     if finalists:
         tg.send(chat, f"🔬 Analisi a fondo (foto + prezzi di mercato) dei {len(finalists)} più promettenti…")
     for a in finalists:
@@ -303,8 +303,15 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
         v = ai.analyze(c, a, s, spend)
         analyzed += 1
         if not v:
+            scartati.append(f"• {esc(a['title'][:60])} — analisi non riuscita\n{esc(a['url'])}")
             continue
         status, v = validate(v, a["price"])
+        if not status:
+            scartati.append(
+                f"• <b>{esc(a['title'][:60])}</b> ({a['price']}€) — {esc(v.get('verdict'))}, margine probabile "
+                f"{esc(v.get('margin_probable_eur'))}€, affidabilità {esc(v.get('reliability_pct'))}%\n"
+                f"  {esc(str(v.get('reasoning') or v.get('ambiguity') or '')[:240])}\n{esc(a['url'])}"
+            )
         if status:
             score = float(v.get("margin_probable_eur", 0)) if status == "buy" else float(v.get("margin_if_ok_eur", 0)) / 2
             deals.append((score + (10000 if status == "buy" else 0), a, v, status))
@@ -316,6 +323,8 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
     if not deals:
         tg.send(chat, f"😶 Nessun affare VERIFICATO con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}% in questa scansione. "
                       f"La classifica veloce qui sopra resta solo indicativa (stime non verificate)." + summary)
+        if scartati:
+            tg.send(chat, "🔎 <b>Perché sono stati scartati i " + str(len(scartati)) + " analizzati:</b>\n\n" + "\n\n".join(scartati))
         return
     n_buy = sum(1 for d in deals if d[3] == "buy")
     tg.send(chat, f"🏆 <b>{n_buy} affari verificati</b> e <b>{len(deals) - n_buy} da verificare</b> (margine ≥ {MIN_MARGIN}€), dal migliore:" + summary)
