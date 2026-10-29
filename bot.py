@@ -39,6 +39,12 @@ STRICT_READY = os.getenv("STRICT_READY", "1") == "1"            # solo oggetti p
 LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "log.csv")
 LAST_RUN = {}
 
+
+def info(chat, text, **kw):
+    """Messaggio di avanzamento: nelle scansioni (modo silenzioso) non si invia, per avere solo 2 messaggi."""
+    if not LAST_RUN.get("quiet"):
+        tg.send(chat, text, **kw)
+
 BUYER_WORDS = re.compile(r"\b(cerco|cercasi|compro|acquisto|ritiro usato)\b", re.I)
 
 # Categorie facili da contraffare e difficili da riconoscere per un non esperto: escluse.
@@ -286,7 +292,8 @@ def run_scan(chat, only=None, auto=False):
         tg.send(chat, f"⏸️ Scansione automatica saltata: spesi ${spent:.2f} negli ultimi 7 giorni, tetto ${WEEKLY_BUDGET_USD:.2f}.")
         return
     LAST_RUN.clear()
-    tg.send(chat, f"🚀 {'Scansione automatica' if auto else 'Scansione'} avviata su {len(links)} ricerca/e (~{TARGET_ADS} annunci ciascuna). Ci vorranno alcuni minuti.")
+    LAST_RUN["quiet"] = True
+    info(chat, f"🚀 {'Scansione automatica' if auto else 'Scansione'} avviata su {len(links)} ricerca/e (~{TARGET_ADS} annunci ciascuna). Ci vorranno alcuni minuti.")
 
     s = subito.make_session()
     use_apify = apify_source.enabled()
@@ -304,14 +311,14 @@ def run_scan(chat, only=None, auto=False):
         new = [a for a in ads if a["id"] not in seen]
         seen.update(a["id"] for a in new)
         all_ads.extend(new)
-        tg.send(chat, f"✅ {esc(name)}: {len(ads)} annunci letti")
+        info(chat, f"✅ {esc(name)}: {len(ads)} annunci letti")
     if not all_ads:
         log_run("auto" if auto else "scan", links, 0, apify_cost)
         return
 
     analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s)
     log_run("auto" if auto else "scan", links, len(all_ads), apify_cost)
-    tg.send(chat, f"🧾 Spesa ultimi 7 giorni: ${weekly_spent():.2f} su tetto ${WEEKLY_BUDGET_USD:.2f} (dettaglio nel registro costi).")
+    info(chat, f"🧾 Spesa ultimi 7 giorni: ${weekly_spent():.2f} su tetto ${WEEKLY_BUDGET_USD:.2f} (dettaglio nel registro costi).")
 
 
 def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
@@ -328,7 +335,8 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
             "Per la valutazione degli affari serve il secret ANTHROPIC_API_KEY.",
         )
         return
-    tg.send(chat, f"📋 {len(all_ads)} annunci totali, {len(candidates)} dopo i filtri di prezzo e di età ({age_stats(all_ads)}). Valutazione veloce con l'AI…")
+    LAST_RUN["head"] = f"{len(all_ads)} annunci letti, {len(candidates)} dopo i filtri di prezzo e di età ({age_stats(all_ads)})"
+    info(chat, f"📋 {len(all_ads)} annunci totali, {len(candidates)} dopo i filtri di prezzo e di età ({age_stats(all_ads)}). Valutazione veloce con l'AI…")
 
     c, spend = ai.client(), ai.Spend()
     LAST_RUN.update(spend=spend, candidates=len(candidates), analyzed=0, deals=0)
@@ -349,7 +357,9 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
     ranked.sort(key=lambda x: -x[0])
 
     lt = ai.LAST_TRIAGE
-    tg.send(
+    LAST_RUN["tri"] = (f"{lt['items']}/{len(candidates)} valutati, errori API {lt['api_errors']}, "
+                       f"risposte illeggibili {lt['parse_failures']}, costo AI veloce ${spend.usd:.2f}")
+    info(
         chat,
         f"🧪 Valutazione veloce: {lt['items']}/{len(candidates)} annunci valutati, {len(ranked)} con un valore stimato "
         f"(errori API {lt['api_errors']}, risposte illeggibili {lt['parse_failures']}) · costo ≈ ${spend.usd:.2f}",
@@ -365,7 +375,7 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
         return
     deals, analyzed, scartati = [], 0, []
     if finalists:
-        tg.send(chat, f"🔬 Analisi a fondo (foto + prezzi di mercato) dei {len(finalists)} più promettenti…")
+        info(chat, f"🔬 Analisi a fondo (foto + prezzi di mercato) dei {len(finalists)} più promettenti…")
     for a in finalists:
         if spend.usd >= MAX_USD_PER_SCAN:
             tg.send(chat, f"⛔ Tetto di spesa per scansione raggiunto (${spend.usd:.2f}). Mi fermo qui.")
@@ -397,13 +407,14 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
     mins = (time.time() - t0) / 60
     summary = f"\n📊 Letti {len(all_ads)} · analizzati a fondo {analyzed} · costo AI ≈ ${spend.usd:.2f} · lettura Subito ≈ ${apify_cost:.2f} · {mins:.0f} min"
     if not deals:
-        tg.send(chat, f"😶 Controllo fatto: nessun affare pronto da rivendere (senza test né riparazioni) con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}%. "
-                      f"La classifica veloce qui sopra resta solo indicativa (stime non verificate)." + summary)
+        text = (f"🎯 <b>MESSAGGIO 2 · Affari pronti</b>\n😶 Controllo fatto: nessun affare pronto da rivendere (senza test né riparazioni) con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}%. "
+                f"La lista del messaggio 1 resta solo indicativa (stime non verificate)." + summary)
         if scartati:
-            tg.send(chat, "🔎 <b>Perché sono stati scartati i " + str(len(scartati)) + " analizzati:</b>\n\n" + "\n\n".join(scartati))
+            text += "\n\n🔎 <b>Perché sono stati scartati i " + str(len(scartati)) + " analizzati a fondo:</b>\n\n" + "\n\n".join(scartati)
+        tg.send(chat, text)
         return
     n_buy = sum(1 for d in deals if d[3] == "buy")
-    tg.send(chat, f"🏆 <b>{n_buy} affari verificati</b> e <b>{len(deals) - n_buy} da verificare</b> (margine ≥ {MIN_MARGIN}€), dal migliore:" + summary)
+    tg.send(chat, f"🎯 <b>MESSAGGIO 2 · Affari pronti</b>\n🏆 <b>{n_buy} affari verificati</b> e <b>{len(deals) - n_buy} da verificare</b> (margine ≥ {MIN_MARGIN}€), dal migliore:" + summary)
     for rank, (_, a, v, status) in enumerate(deals, 1):
         tg.send(chat, STATUS_LABEL[status] + "\n" + format_deal(rank, a, v))
 
@@ -439,8 +450,11 @@ def send_ranking(chat, ranked):
     if not top:
         tg.send(chat, "Nessun annuncio con un valore stimato.")
         return
-    lines = [f"📋 <b>Classifica veloce</b> (top {len(top)}, dal migliore). Sono stime NON verificate: "
-             "prezzo → rivendita stimata, margine al netto del 10%, confidenza dell'AI.\n"]
+    lines = [f"📋 <b>MESSAGGIO 1 · Annunci da guardare quando hai tempo</b> (top {len(top)}, dal migliore)."]
+    if LAST_RUN.get("head"):
+        lines.append(esc(LAST_RUN["head"]) + ".")
+    lines.append("Sono stime NON verificate: prezzo → rivendita stimata, margine al netto del 10%, confidenza dell'AI. "
+                 "Gli affari veri sono nel messaggio 2.\n")
     for n, (_, est, v, conf, note, a) in enumerate(top, 1):
         title = esc(a["title"][:45])
         url = _html.escape(a["url"] or "", quote=True)
@@ -448,11 +462,12 @@ def send_ranking(chat, ranked):
             f'{n}. <a href="{url}">{title}</a>\n   {a["price"]}€ → ~{v:.0f}€ · margine ~{est:.0f}€ · conf {conf:.0f}%'
             + (f" · {esc(note[:40])}" if note else "")
         )
+    lines.append("\nPer verificare a fondo uno o più annunci (foto + prezzi di mercato, circa 0,15 $ ciascuno) scrivi i loro NUMERI, per esempio: /analizza 2 5 3")
     tg.send(chat, "\n".join(lines))
-    tg.send(chat, "Per verificare a fondo uno o più annunci (foto + prezzi di mercato, circa 0,15 $ ciascuno) scrivi i loro NUMERI, per esempio:\n/analizza 2 5 3")
 
 
 def run_rescan(chat):
+    LAST_RUN.clear()
     """Rianalizza gli ultimi dati già letti da Apify, senza pagare di nuovo la lettura."""
     t0 = time.time()
     if not apify_source.enabled():
