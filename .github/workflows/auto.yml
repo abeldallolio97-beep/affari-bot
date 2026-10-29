@@ -1,0 +1,43 @@
+name: scansione-automatica
+
+on:
+  schedule:
+    # lunedì, mercoledì, venerdì alle 16:13 UTC (17:13 ora italiana d'inverno)
+    - cron: "13 16 * * 1,3,5"
+  workflow_dispatch:
+
+concurrency:
+  group: bot
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  auto:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python bot.py auto
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      - name: salva stato e registro costi
+        if: always()
+        run: |
+          if [ -n "$(git status --porcelain state 2>/dev/null)" ]; then
+            git config user.name "affari-bot"
+            git config user.email "affari-bot@users.noreply.github.com"
+            git add state
+            git commit -q -m "stato: registro costi"
+            git pull -q --rebase origin main || true
+            git push -q origin HEAD:main || true
+          fi

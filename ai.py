@@ -68,7 +68,7 @@ TRIAGE_SYSTEM = (
     "Subito.it (Torino), uno per riga nel formato: numero|prezzo|titolo|caratteristiche|descrizione. "
     "Per ciascuno stima a quanto lo si rivende REALISTICAMENTE (prezzo di vendita usato in Italia, "
     "privati/Vinted/eBay), se ha un valore sensato. Se è spazzatura, ricambi, un oggetto non identificabile "
-    "o un annuncio di acquisto, metti valore 0. Se manca qualche dato (es. memoria) usa il caso più probabile "
+    "o un annuncio di acquisto, metti valore 0. Se l'annuncio dice che è da riparare, non funzionante, da testare o per ricambi, metti valore 0. Se manca qualche dato (es. memoria) usa il caso più probabile "
     "e abbassa la confidenza. Non essere ottimista: il valore è il prezzo a cui si vende davvero in poche "
     "settimane, in condizioni medie, non il massimo. Se è un lotto, ha difetti dichiarati o è un oggetto raro "
     "e di difficile prezzo, abbassa la confidenza.\n"
@@ -151,6 +151,7 @@ REGOLE
   Per ogni riferimento indica fonte, tipo e prezzo. La rivendita realistica ha come tetto il prezzo dell'usato di privati/venduto, non quello del nuovo. Con meno di 3 riferimenti, o tutti dello stesso tipo, l'affidabilità massima è 50.
 - AUTENTICITÀ E STATO: giudicali SOLO da indizi concreti: foto (loghi, etichette, cuciture, seriali, refusi, condizioni, accessori), testo dell'annuncio, scatola/ricevuta, profilo del venditore. Descrivi cosa vedi davvero. Se le foto non bastano a decidere, scrivi "non_verificabile": NON assumere il falso né l'originale per via del prezzo. Stima la probabilità che sia a posto solo dagli indizi (senza indizi: neutra, 50-60%), e indica cosa far verificare al venditore (foto del seriale, prova d'acquisto, video acceso...).
 - Per oggetti difficili da copiare (hi-fi, strumenti, ottiche, elettronica di marca) il rischio vero è il GUASTO: leggi la descrizione per "non funzionante / da riparare / difetti", valuta il costo di una riparazione realistica e, se il funzionamento non è dichiarato, scrivi in ask_seller di chiedere un video con l'oggetto acceso e funzionante (es. per un lettore CD/SACD: lettura del disco e cassetto che si apre).
+- PRONTO DA RIVENDERE ("ready"): true SOLO se l'oggetto si può rivendere subito senza controlli: nuovo/sigillato/imballato, oppure con garanzia/scontrino/fattura, oppure funzionamento già provato nell'annuncio (video, test dichiarato in modo credibile), oppure un oggetto che non richiede prove (arredo, giocattoli o set sigillati, libri...). Metti false se serve testarlo, ripararlo, pulirlo, completarlo o far verificare l'autenticità/funzionamento al venditore. L'utente NON vuole oggetti che richiedano controlli, test o riparazioni: in quel caso il verdetto deve essere SKIP.
 - Se manca un dato (modello, memoria, accessori) NON scartare: calcola il margine PROBABILE e il margine PEGGIORE, spiega l'ambiguità e cosa chiedere.
 - Sii prudente sul prezzo di rivendita: quello a cui si vende davvero in tempi ragionevoli, non il massimo sperato.
 - Affidabilità (0-100) = quanto sei sicuro della VALUTAZIONE DI MERCATO (identificazione dell'oggetto e prezzi).
@@ -161,7 +162,7 @@ VERDETTO
 - "SKIP": non c'è margine, oppure ci sono indizi CONCRETI di falso/truffa/difetto grave.
 
 OUTPUT: SOLO un oggetto JSON, senza altro testo:
-{"verdict":"BUY"|"VERIFY"|"SKIP","identified_item":"","authenticity":"originale_probabile|non_verificabile|dubbia|falso_probabile|non_applicabile","resale_estimate_eur":0,"margin_probable_eur":0,"margin_worst_eur":0,"margin_if_ok_eur":0,"loss_if_bad_eur":0,"reliability_pct":0,"references":[{"source":"","type":"nuovo|ricondizionato|usato_negozio|usato_privato|venduto","price_eur":0,"note":""}],"ambiguity":"","ask_seller":"","reasoning":"max 3 frasi"}"""
+{"verdict":"BUY"|"VERIFY"|"SKIP","identified_item":"","ready":true|false,"new_price_eur":0,"used_price_eur":0,"authenticity":"originale_probabile|non_verificabile|dubbia|falso_probabile|non_applicabile","resale_estimate_eur":0,"margin_probable_eur":0,"margin_worst_eur":0,"margin_if_ok_eur":0,"loss_if_bad_eur":0,"reliability_pct":0,"references":[{"source":"","type":"nuovo|ricondizionato|usato_negozio|usato_privato|venduto","price_eur":0,"note":""}],"ambiguity":"","ask_seller":"","reasoning":"max 3 frasi"}"""
 
 
 def _image_blocks(urls, session, limit=3):

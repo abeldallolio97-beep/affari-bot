@@ -34,6 +34,11 @@ TRIAGE_MARGIN = int(os.getenv("TRIAGE_MARGIN", "90"))      # soglia larga del tr
 RANK_SHOW = int(os.getenv("RANK_SHOW", "100"))              # righe della classifica veloce
 MAX_AGE_DAYS = float(os.getenv("MAX_AGE_DAYS", "3"))        # ignora annunci più vecchi di N giorni
 
+WEEKLY_BUDGET_USD = float(os.getenv("WEEKLY_BUDGET_USD", "6"))   # ~5 € a settimana
+STRICT_READY = os.getenv("STRICT_READY", "1") == "1"            # solo oggetti pronti da rivendere, senza test/riparazioni
+LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "state", "log.csv")
+LAST_RUN = {}
+
 BUYER_WORDS = re.compile(r"\b(cerco|cercasi|compro|acquisto|ritiro usato)\b", re.I)
 
 # Categorie facili da contraffare e difficili da riconoscere per un non esperto: escluse.
@@ -56,7 +61,8 @@ if _extra:
 FAKE_PRONE = re.compile(r"\b(" + _FAKE_PRONE + r")\b", re.I)
 
 
-def load_links(only=None):
+def load_links(only=None, auto_only=False):
+    """links.txt: 'nome | link' oppure 'nome | link | auto' (le righe auto partono nella scansione automatica)."""
     links = []
     here = os.path.dirname(os.path.abspath(__file__))
     with open(os.path.join(here, "links.txt"), encoding="utf-8") as f:
@@ -64,11 +70,59 @@ def load_links(only=None):
             line = line.strip()
             if not line or line.startswith("#") or "|" not in line:
                 continue
-            name, url = [x.strip() for x in line.split("|", 1)]
+            parts = [x.strip() for x in line.split("|")]
+            name, url = parts[0], parts[1]
+            flags = [x.lower() for x in parts[2:]]
             if only and only.lower() not in name.lower():
+                continue
+            if auto_only and "auto" not in flags:
                 continue
             links.append((name, url))
     return links
+
+
+def weekly_spent():
+    """Dollari spesi (lettura + AI) negli ultimi 7 giorni, dal registro state/log.csv."""
+    import csv
+
+    total, now = 0.0, datetime.now(timezone.utc)
+    try:
+        with open(LOG_PATH, encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                try:
+                    when = datetime.fromisoformat(r["when_utc"])
+                    if (now - when).total_seconds() <= 7 * 86400:
+                        total += float(r["apify_usd"] or 0) + float(r["ai_usd"] or 0)
+                except (KeyError, ValueError):
+                    continue
+    except OSError:
+        pass
+    return total
+
+
+def log_run(kind, links, ads_read, apify_usd):
+    """Aggiunge una riga al registro dei costi (serve al foglio costi/ricavi)."""
+    import csv
+
+    sp = LAST_RUN.get("spend")
+    row = {
+        "when_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "kind": kind,
+        "links": ";".join(n for n, _ in links),
+        "ads_read": ads_read,
+        "candidates": LAST_RUN.get("candidates", 0),
+        "deep_analyzed": LAST_RUN.get("analyzed", 0),
+        "deals": LAST_RUN.get("deals", 0),
+        "apify_usd": round(apify_usd, 3),
+        "ai_usd": round(sp.usd, 3) if sp else 0,
+    }
+    os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+    new = not os.path.exists(LOG_PATH)
+    with open(LOG_PATH, "a", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(row))
+        if new:
+            w.writeheader()
+        w.writerow(row)
 
 
 # ----------------------------------------------------------------------- test
@@ -157,6 +211,9 @@ def validate(v, price):
             rel = min(rel, 50)
         v["reliability_pct"] = rel
         verdict = str(v.get("verdict", "")).upper()
+        if STRICT_READY and v.get("ready") is not True:
+            v["_scarto"] = "richiede controlli/test/riparazioni prima di poterlo rivendere"
+            return None, v
         probable = float(v.get("margin_probable_eur") or 0)
         worst = float(v.get("margin_worst_eur") or 0)
         if verdict == "BUY" and probable >= MIN_MARGIN and worst >= 0 and rel >= MIN_RELIABILITY:
@@ -190,6 +247,13 @@ def format_deal(rank, ad, v):
         f"🎯 Affidabilità {v.get('reliability_pct')}% · {esc(ad.get('town'))} · {esc(ad.get('date'))}",
         f"📊 Riferimenti: {refs or 'n/d'}",
     ]
+    new_p, used_p = v.get("new_price_eur"), v.get("used_price_eur")
+    if new_p or used_p:
+        out.append(f"🏷️ Nuovo: {new_p if new_p else 'fuori produzione/n.d.'}{'€' if new_p else ''} · Usato (privati): {used_p if used_p else 'n.d.'}{'€' if used_p else ''}")
+    if v.get("ready") is True:
+        out.append("✅ Pronto da rivendere: nessun test o riparazione necessari")
+    elif v.get("ready") is False:
+        out.append("🛠️ NON pronto: servono controlli/test/riparazioni" + (f" ({esc(v['_scarto'])})" if v.get("_scarto") else ""))
     if v.get("authenticity") and v.get("authenticity") != "non_applicabile":
         out.append(f"🔎 Autenticità/stato: {esc(str(v['authenticity']).replace('_', ' '))}")
     if v.get("margin_if_ok_eur") is not None and v.get("loss_if_bad_eur") is not None:
@@ -207,15 +271,20 @@ def format_deal(rank, ad, v):
     return "\n".join(out)
 
 
-def run_scan(chat, only=None):
+def run_scan(chat, only=None, auto=False):
     import ai
 
     t0 = time.time()
-    links = load_links(only)
+    links = load_links(only, auto_only=auto)
     if not links:
         tg.send(chat, "Nessun link trovato in links.txt per quella ricerca.")
         return
-    tg.send(chat, f"🚀 Scansione avviata su {len(links)} ricerca/e (obiettivo ~{TARGET_ADS} annunci ciascuna). Ci vorranno alcuni minuti.")
+    spent = weekly_spent()
+    if auto and spent >= WEEKLY_BUDGET_USD:
+        tg.send(chat, f"⏸️ Scansione automatica saltata: spesi ${spent:.2f} negli ultimi 7 giorni, tetto ${WEEKLY_BUDGET_USD:.2f}.")
+        return
+    LAST_RUN.clear()
+    tg.send(chat, f"🚀 {'Scansione automatica' if auto else 'Scansione'} avviata su {len(links)} ricerca/e (~{TARGET_ADS} annunci ciascuna). Ci vorranno alcuni minuti.")
 
     s = subito.make_session()
     use_apify = apify_source.enabled()
@@ -235,9 +304,12 @@ def run_scan(chat, only=None):
         all_ads.extend(new)
         tg.send(chat, f"✅ {esc(name)}: {len(ads)} annunci letti")
     if not all_ads:
+        log_run("auto" if auto else "scan", links, 0, apify_cost)
         return
 
     analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s)
+    log_run("auto" if auto else "scan", links, len(all_ads), apify_cost)
+    tg.send(chat, f"🧾 Spesa ultimi 7 giorni: ${weekly_spent():.2f} su tetto ${WEEKLY_BUDGET_USD:.2f} (dettaglio nel registro costi).")
 
 
 def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
@@ -257,6 +329,7 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
     tg.send(chat, f"📋 {len(all_ads)} annunci totali, {len(candidates)} dopo i filtri di prezzo e di età ({age_stats(all_ads)}). Valutazione veloce con l'AI…")
 
     c, spend = ai.client(), ai.Spend()
+    LAST_RUN.update(spend=spend, candidates=len(candidates), analyzed=0, deals=0)
     tri = ai.triage(c, candidates, spend)
     ranked = []  # (punteggio, margine stimato, valore stimato, confidenza, nota, annuncio)
     for idx, a in enumerate(candidates):
@@ -310,18 +383,19 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
             scartati.append(
                 f"• <b>{esc(a['title'][:60])}</b> ({a['price']}€) — {esc(v.get('verdict'))}, margine probabile "
                 f"{esc(v.get('margin_probable_eur'))}€, affidabilità {esc(v.get('reliability_pct'))}%\n"
-                f"  {esc(str(v.get('reasoning') or v.get('ambiguity') or '')[:240])}\n{esc(a['url'])}"
+                f"  {esc(str(v.get('_scarto') or v.get('reasoning') or v.get('ambiguity') or '')[:240])}\n{esc(a['url'])}"
             )
         if status:
             score = float(v.get("margin_probable_eur", 0)) if status == "buy" else float(v.get("margin_if_ok_eur", 0)) / 2
             deals.append((score + (10000 if status == "buy" else 0), a, v, status))
         time.sleep(0.5)
 
+    LAST_RUN.update(analyzed=analyzed, deals=len(deals))
     deals.sort(key=lambda x: -x[0])
     mins = (time.time() - t0) / 60
     summary = f"\n📊 Letti {len(all_ads)} · analizzati a fondo {analyzed} · costo AI ≈ ${spend.usd:.2f} · lettura Subito ≈ ${apify_cost:.2f} · {mins:.0f} min"
     if not deals:
-        tg.send(chat, f"😶 Nessun affare VERIFICATO con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}% in questa scansione. "
+        tg.send(chat, f"😶 Controllo fatto: nessun affare pronto da rivendere (senza test né riparazioni) con margine ≥ {MIN_MARGIN}€ e affidabilità ≥ {MIN_RELIABILITY}%. "
                       f"La classifica veloce qui sopra resta solo indicativa (stime non verificate)." + summary)
         if scartati:
             tg.send(chat, "🔎 <b>Perché sono stati scartati i " + str(len(scartati)) + " analizzati:</b>\n\n" + "\n\n".join(scartati))
@@ -490,5 +564,7 @@ if __name__ == "__main__":
         run_poll()
     elif mode == "scan":
         run_scan(CHAT_ID, sys.argv[2] if len(sys.argv) > 2 else None)
+    elif mode == "auto":
+        run_scan(CHAT_ID, None, auto=True)
     elif mode == "test":
         run_test(CHAT_ID)
