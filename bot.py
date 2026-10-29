@@ -36,6 +36,25 @@ MAX_AGE_DAYS = float(os.getenv("MAX_AGE_DAYS", "3"))        # ignora annunci piÃ
 
 BUYER_WORDS = re.compile(r"\b(cerco|cercasi|compro|acquisto|ritiro usato)\b", re.I)
 
+# Categorie facili da contraffare e difficili da riconoscere per un non esperto: escluse.
+# Si puÃ² aggiungere altro dalla variabile EXCLUDE_EXTRA (parole separate da virgola).
+_FAKE_PRONE = (
+    r"scarp\w*|sneaker\w*|stivali|stivaletti|mocassin\w*|ciabatt\w*|sandali|"
+    r"felp\w*|maglia|maglietta|t-?shirt|polo|camicia|pantalon\w*|jeans|tuta|"
+    r"giubb\w*|giacc\w*|piumin\w*|cappotto|k-?way|cappell\w*|berretto|sciarpa|"
+    r"borsa|borsetta|borsello|marsupio|zaino|portafogli\w*|cintura|"
+    r"occhiali|ray-?ban|profum\w*|"
+    r"nike|adidas|jordan|yeezy|new balance|converse|vans|puma|asics|"
+    r"supreme|off-?white|stone island|moncler|north face|carhartt|stussy|palace|"
+    r"gucci|prada|louis vuitton|\blv\b|chanel|dior|hermes|balenciaga|fendi|versace|burberry|armani|"
+    r"rolex|omega|cartier|patek|audemars|tag heuer|"
+    r"airpods?|apple pencil|labubu fake|replica|copia"
+)
+_extra = [w.strip() for w in os.getenv("EXCLUDE_EXTRA", "").split(",") if w.strip()]
+if _extra:
+    _FAKE_PRONE += "|" + "|".join(re.escape(w) for w in _extra)
+FAKE_PRONE = re.compile(r"\b(" + _FAKE_PRONE + r")\b", re.I)
+
 
 def load_links(only=None):
     links = []
@@ -120,6 +139,8 @@ def passes_rules(a):
     if age is not None and age > MAX_AGE_DAYS:
         return False
     if BUYER_WORDS.search(a["title"]):
+        return False
+    if FAKE_PRONE.search(a["title"]) or FAKE_PRONE.search(a.get("features") or ""):
         return False
     return True
 
