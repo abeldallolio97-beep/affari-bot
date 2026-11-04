@@ -20,3 +20,10 @@ audio pioneer cdj | https://www.subito.it/annunci-italia/vendita/usato/?shp=true
 audio pioneer djm | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=pioneer+djm&ps=250 | max=100
 audio marantz | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=marantz&ps=150 | max=100
 audio kef | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=kef&ps=200 | max=100
+
+# Lotti e venditori motivati, Torino, ritiro a mano (annunci fino a 14 giorni, da 10 euro)
+lotti lotto | https://www.subito.it/annunci-piemonte/vendita/usato/torino/torino/?order=datedesc&q=lotto | max=100 | age=14 | min=10
+lotti collezione | https://www.subito.it/annunci-piemonte/vendita/usato/torino/torino/?order=datedesc&q=collezione | max=100 | age=14 | min=10
+lotti sgombero | https://www.subito.it/annunci-piemonte/vendita/usato/torino/torino/?order=datedesc&q=sgombero | max=100 | age=14 | min=10
+lotti trasloco | https://www.subito.it/annunci-piemonte/vendita/usato/torino/torino/?order=datedesc&q=trasloco+urgente | max=100 | age=14 | min=10
+lotti svuoto cantina | https://www.subito.it/annunci-piemonte/vendita/usato/torino/torino/?order=datedesc&q=svuoto+cantina | max=100 | age=14 | min=10

@@ -69,6 +69,7 @@ FAKE_PRONE = re.compile(r"\b(" + _FAKE_PRONE + r")\b", re.I)
 
 
 LINK_MAX = {}  # tetto di annunci per ricerca, dalla colonna "max=100" di links.txt
+LINK_OPTS = {}  # opzioni per ricerca da links.txt: age=14 (giorni massimi), min=10 (prezzo minimo)
 
 
 def load_links(only=None, auto_only=False):
@@ -86,6 +87,9 @@ def load_links(only=None, auto_only=False):
             for fl in flags:
                 if fl.startswith("max=") and fl[4:].isdigit():
                     LINK_MAX[name] = int(fl[4:])
+                for key in ("age", "min"):
+                    if fl.startswith(key + "=") and fl[len(key) + 1:].isdigit():
+                        LINK_OPTS.setdefault(name, {})[key] = float(fl[len(key) + 1:])
             if only and only.lower() not in name.lower():
                 continue
             if auto_only and "auto" not in flags:
@@ -217,10 +221,11 @@ def age_stats(ads):
 
 
 def passes_rules(a):
-    if not a["price"] or a["price"] < MIN_PRICE or a["price"] > MAX_PRICE:
+    opts = LINK_OPTS.get(a.get("_src"), {})
+    if not a["price"] or a["price"] < opts.get("min", MIN_PRICE) or a["price"] > MAX_PRICE:
         return False
     age = age_days(a)
-    if age is not None and age > MAX_AGE_DAYS:
+    if age is not None and age > opts.get("age", MAX_AGE_DAYS):
         return False
     if BUYER_WORDS.search(a["title"]):
         return False
@@ -330,6 +335,8 @@ def run_scan(chat, only=None, auto=False):
             status = err or "ok"
         else:
             ads, status = subito.fetch_all(s, url, target=LINK_MAX.get(name, TARGET_ADS), progress=lambda m: tg.send(chat, f"{name}: {m}"))
+        for a in ads:
+            a["_src"] = name
         if not ads:
             tg.send(chat, f"⚠️ {esc(name)}: nessun annuncio letto ({esc(status)}). Prova /test per capire.")
         new = [a for a in ads if a["id"] not in seen]
