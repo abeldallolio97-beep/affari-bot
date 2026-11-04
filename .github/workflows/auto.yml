@@ -1,9 +1,7 @@
 name: scansione-automatica
 
 on:
-  schedule:
-    # ogni mercoledì alle 16:00 UTC (17:00 ora italiana d'inverno; con l'ora legale diventano le 18:00)
-    - cron: "0 16 * * 3"
+  # nessuna partenza automatica: si lancia a mano da Actions > scansione-automatica > Run workflow
   workflow_dispatch:
 
 concurrency:
