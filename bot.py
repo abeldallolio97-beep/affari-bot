@@ -428,7 +428,9 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
             scartati.append(
                 f"• <b>{esc(a['title'][:60])}</b> ({a['price']}€) — {esc(v.get('verdict'))}, margine probabile "
                 f"{esc(v.get('margin_probable_eur'))}€, affidabilità {esc(v.get('reliability_pct'))}%\n"
-                f"  {esc(str(v.get('_scarto') or v.get('reasoning') or v.get('ambiguity') or '')[:240])}\n{esc(a['url'])}"
+                f"  {esc(str(v.get('reasoning') or v.get('ambiguity') or '')[:240])}"
+                + (f"\n  ⚠️ {esc(v['_scarto'])}" if v.get("_scarto") else "")
+                + f"\n{esc(a['url'])}"
             )
         if status:
             score = float(v.get("margin_probable_eur", 0)) if status == "buy" else float(v.get("margin_if_ok_eur", 0)) / 2
