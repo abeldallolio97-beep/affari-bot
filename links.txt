@@ -6,3 +6,17 @@ fotografia italia spedizione | https://www.subito.it/annunci-italia/vendita/foto
 fotografia torino | https://www.subito.it/annunci-piemonte/vendita/fotografia/torino/torino/?order=datedesc&ps=100 | auto
 vinted pokemon sigillato | https://www.vinted.it/catalog?search_text=pokemon+display+sigillato&order=newest_first&price_from=30
 vino italia spedizione | https://www.subito.it/annunci-italia/vendita/usato/?q=vino&shp=true&order=datedesc&ps=40
+
+# Prova categorie con nome (tutta Italia, spedizione, max 100 annunci l'una)
+utensili festool | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=festool&ps=100 | max=100
+utensili hilti | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=hilti&ps=100 | max=100
+utensili milwaukee | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=milwaukee+m18&ps=100 | max=100
+utensili makita | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=makita&ps=150 | max=100
+caffe rocket | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=rocket+espresso&ps=300 | max=100
+caffe la marzocco | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=la+marzocco&ps=300 | max=100
+caffe profitec | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=profitec&ps=300 | max=100
+audio technics 1200 | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=technics+sl-1200&ps=200 | max=100
+audio pioneer cdj | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=pioneer+cdj&ps=250 | max=100
+audio pioneer djm | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=pioneer+djm&ps=250 | max=100
+audio marantz | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=marantz&ps=150 | max=100
+audio kef | https://www.subito.it/annunci-italia/vendita/usato/?shp=true&order=datedesc&q=kef&ps=200 | max=100

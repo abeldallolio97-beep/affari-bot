@@ -68,6 +68,9 @@ if _extra:
 FAKE_PRONE = re.compile(r"\b(" + _FAKE_PRONE + r")\b", re.I)
 
 
+LINK_MAX = {}  # tetto di annunci per ricerca, dalla colonna "max=100" di links.txt
+
+
 def load_links(only=None, auto_only=False):
     """links.txt: 'nome | link' oppure 'nome | link | auto' (le righe auto partono nella scansione automatica)."""
     links = []
@@ -80,6 +83,9 @@ def load_links(only=None, auto_only=False):
             parts = [x.strip() for x in line.split("|")]
             name, url = parts[0], parts[1]
             flags = [x.lower() for x in parts[2:]]
+            for fl in flags:
+                if fl.startswith("max=") and fl[4:].isdigit():
+                    LINK_MAX[name] = int(fl[4:])
             if only and only.lower() not in name.lower():
                 continue
             if auto_only and "auto" not in flags:
@@ -319,11 +325,11 @@ def run_scan(chat, only=None, auto=False):
     for name, url in links:
         if use_apify:
             reader = vinted_source.scrape if vinted_source.is_vinted(url) else apify_source.scrape
-            ads, cost, err = reader(url, TARGET_ADS)
+            ads, cost, err = reader(url, LINK_MAX.get(name, TARGET_ADS))
             apify_cost += cost
             status = err or "ok"
         else:
-            ads, status = subito.fetch_all(s, url, target=TARGET_ADS, progress=lambda m: tg.send(chat, f"{name}: {m}"))
+            ads, status = subito.fetch_all(s, url, target=LINK_MAX.get(name, TARGET_ADS), progress=lambda m: tg.send(chat, f"{name}: {m}"))
         if not ads:
             tg.send(chat, f"⚠️ {esc(name)}: nessun annuncio letto ({esc(status)}). Prova /test per capire.")
         new = [a for a in ads if a["id"] not in seen]

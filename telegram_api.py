@@ -15,7 +15,8 @@ def esc(s):
 MENU = {
     "keyboard": [
         ["/scan console", "/scan foto"],
-        ["/scan elettronica", "/scan casa"],
+        ["/scan utensili", "/scan caffe", "/scan audio"],
+        ["/scan vino", "/scan vinted"],
         ["/scan", "/ri"],
         ["/help"],
     ],
