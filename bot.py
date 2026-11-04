@@ -28,7 +28,7 @@ MIN_PRICE = int(os.getenv("MIN_PRICE", "40"))              # scarta sotto questo
 MAX_PRICE = int(os.getenv("MAX_PRICE", "2500"))            # scarta sopra (capitale)
 MIN_VALUE = int(os.getenv("MIN_VALUE", "150"))             # scarta se rivendita stimata sotto
 TARGET_ADS = int(os.getenv("TARGET_ADS", "500"))          # annunci per link
-MAX_FINALISTS = int(os.getenv("MAX_FINALISTS", "5"))      # analisi a fondo per scansione
+MAX_FINALISTS = int(os.getenv("MAX_FINALISTS", "0"))      # analisi a fondo automatiche per scansione (0 = spenta: si sceglie con /analizza)
 MAX_USD_PER_SCAN = float(os.getenv("MAX_USD_PER_SCAN", "1"))  # tetto di spesa per scansione
 VERIFY_MAX_LOSS = int(os.getenv("VERIFY_MAX_LOSS", "150"))      # perdita massima accettata per "da verificare"
 TRIAGE_MARGIN = int(os.getenv("TRIAGE_MARGIN", "90"))      # soglia larga del triage
@@ -397,9 +397,14 @@ def analyze_ads(chat, all_ads, apify_cost, t0, use_apify, s, deep=True):
     send_ranking(chat, ranked)
 
     # analisi a fondo (costosa) solo per i pochi candidati che superano le soglie
+    if MAX_FINALISTS <= 0:
+        deep = False
     finalists = [r[5] for r in ranked if r[2] >= MIN_VALUE and r[1] >= TRIAGE_MARGIN][:MAX_FINALISTS] if deep else []
     if not deep:
-        tg.send(chat, f"💡 Costo totale ≈ ${spend.usd:.2f}. Per verificare a fondo un annuncio: /analizza <link>.")
+        tg.send(chat, f"🎯 <b>AFFARI DA CONCLUDERE</b>\nL'analisi a fondo automatica è spenta per risparmiare. "
+                      f"Guarda la lista dei risultati e scegli i numeri che ti interessano, poi scrivi per esempio /analizza 2 5 3 "
+                      f"(circa 0,15 $ ciascuno): ti dico se è un affare vero, con prezzo nuovo, usato e cosa chiedere al venditore.\n"
+                      f"📊 Costo AI di questa scansione ≈ ${spend.usd:.2f} · lettura Subito ≈ ${apify_cost:.2f}")
         return
     deals, analyzed, scartati = [], 0, []
     if finalists:
